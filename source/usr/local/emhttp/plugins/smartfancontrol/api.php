@@ -5,12 +5,13 @@ declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-const SFC_VERSION = '0.1.4';
+const SFC_VERSION = '0.1.6';
 const SFC_CONFIG = '/boot/config/plugins/smartfancontrol/config.json';
 const SFC_RUN = '/run/smartfancontrol';
 const SFC_STATUS = SFC_RUN . '/status.json';
 const SFC_PID = SFC_RUN . '/smartfancontrol.pid';
 const SFC_RC = '/etc/rc.d/rc.smartfancontrol';
+const SFC_DRIVERS = '/boot/config/plugins/smartfancontrol/drivers.conf';
 
 function respond(array $data, int $status = 200): never {
     http_response_code($status);
@@ -132,6 +133,136 @@ function scanHardware(): array {
     return ['pwms' => $pwms, 'fans' => $fans, 'temps' => $temps, 'gpus' => $gpus];
 }
 
+function commandPath(string $name): string {
+    if (!preg_match('/^[a-zA-Z0-9_.-]+$/', $name)) return '';
+    $out = []; $rc = 0;
+    @exec('command -v ' . escapeshellarg($name) . ' 2>/dev/null', $out, $rc);
+    if ($rc !== 0 || !$out) return '';
+    $path = trim((string)$out[0]);
+    return ($path !== '' && is_executable($path)) ? $path : '';
+}
+
+function sanitizeModules(mixed $value): array {
+    $items = is_array($value) ? $value : preg_split('/[\\s,;]+/', (string)$value, -1, PREG_SPLIT_NO_EMPTY);
+    $out = [];
+    foreach (($items ?: []) as $item) {
+        $module = trim((string)$item);
+        if ($module === '' || !preg_match('/^[a-zA-Z0-9_-]+$/', $module)) continue;
+        // Linux normalizes '-' to '_' in /sys/module; keep the module spelling returned by sensors-detect.
+        if (!in_array($module, $out, true)) $out[] = $module;
+        if (count($out) >= 64) break;
+    }
+    return $out;
+}
+
+function readDrivers(): array {
+    $raw = @file_get_contents(SFC_DRIVERS);
+    return $raw === false ? [] : sanitizeModules($raw);
+}
+
+function moduleLoaded(string $module): bool {
+    $sys = '/sys/module/' . str_replace('-', '_', $module);
+    return is_dir($sys);
+}
+
+function moduleAvailable(string $module): bool {
+    if (moduleLoaded($module)) return true;
+    $out = []; $rc = 0;
+    @exec('modprobe -n -q ' . escapeshellarg($module) . ' >/dev/null 2>&1', $out, $rc);
+    return $rc === 0;
+}
+
+function driverInfo(?array $modules = null): array {
+    $modules ??= readDrivers();
+    $detector = commandPath('sensors-detect');
+    $perl = commandPath('perl');
+    $status = [];
+    foreach ($modules as $module) {
+        $status[] = [
+            'name' => $module,
+            'loaded' => moduleLoaded($module),
+            'available' => moduleAvailable($module),
+        ];
+    }
+    return [
+        'modules' => array_values($modules),
+        'status' => $status,
+        'detect_available' => $detector !== '' && $perl !== '',
+        'sensors_detect' => $detector,
+        'perl' => $perl,
+    ];
+}
+
+function parseDetectedModules(string $text): array {
+    $found = [];
+
+    // Standard lm-sensors output contains lines such as: Driver `coretemp':
+    if (preg_match_all('/^Driver\\s+[`\\\'"]*([a-zA-Z0-9_-]+)[`\\\'"]*\\s*:/mi', $text, $m)) {
+        foreach ($m[1] as $module) $found[] = $module;
+    }
+
+    // Also understand the shell snippet emitted near the end of sensors-detect.
+    $inChipDrivers = false;
+    foreach (preg_split('/\\R/', $text) ?: [] as $line) {
+        $trim = trim($line);
+        if (preg_match('/^#\\s*Chip drivers\\s*$/i', $trim)) {
+            $inChipDrivers = true;
+            continue;
+        }
+        if (!$inChipDrivers) continue;
+        if ($trim === '') continue;
+        if (str_starts_with($trim, '#')) {
+            if (preg_match('/^#-+/', $trim)) break;
+            continue;
+        }
+        foreach (preg_split('/\\s+/', $trim) ?: [] as $token) {
+            if (preg_match('/^[a-zA-Z0-9_-]+$/', $token)) $found[] = $token;
+        }
+    }
+
+    $valid = [];
+    foreach (sanitizeModules($found) as $module) {
+        if (moduleAvailable($module)) $valid[] = $module;
+    }
+    sort($valid, SORT_STRING);
+    return array_values(array_unique($valid));
+}
+
+function detectDrivers(): array {
+    $detector = commandPath('sensors-detect');
+    $perl = commandPath('perl');
+    if ($detector === '') {
+        return ['ok' => false, 'error' => 'sensors-detect 不可用；当前 Unraid 未提供 lm-sensors 检测脚本。'];
+    }
+    if ($perl === '') {
+        return ['ok' => false, 'error' => 'Perl 不可用；sensors-detect 需要 Perl 才能执行自动检测。'];
+    }
+
+    $out = []; $rc = 0;
+    $timeout = commandPath('timeout');
+    $cmd = ($timeout !== '' ? escapeshellarg($timeout) . ' 90 ' : '')
+        . escapeshellarg($detector) . ' --auto 2>&1';
+    @exec($cmd, $out, $rc);
+    $text = implode("\\n", $out);
+    $modules = parseDetectedModules($text);
+    if (!$modules) {
+        $tail = trim(implode("\\n", array_slice($out, -12)));
+        $error = '自动检测完成，但没有找到可加载的 hwmon 驱动。';
+        if ($rc !== 0) $error .= ' sensors-detect 返回代码 ' . $rc . '。';
+        return ['ok' => false, 'error' => $error, 'rc' => $rc, 'output_tail' => $tail];
+    }
+    return ['ok' => true, 'modules' => $modules, 'rc' => $rc, 'output_tail' => trim(implode("\\n", array_slice($out, -12)))];
+}
+
+function writeDrivers(array $modules): bool {
+    @mkdir(dirname(SFC_DRIVERS), 0755, true);
+    $tmp = SFC_DRIVERS . '.tmp.' . getmypid();
+    $body = $modules ? implode("\\n", $modules) . "\\n" : '';
+    if (@file_put_contents($tmp, $body, LOCK_EX) === false) return false;
+    @chmod($tmp, 0644);
+    return @rename($tmp, SFC_DRIVERS);
+}
+
 function clampFloat(mixed $v, float $min, float $max, float $default): float {
     if (!is_numeric($v)) return $default;
     return max($min, min($max, (float)$v));
@@ -218,7 +349,7 @@ function daemonRunning(): bool {
 }
 
 function runRc(string $action): array {
-    if (!in_array($action, ['start','stop','restart','status'], true)) return ['rc'=>2,'output'=>'invalid action'];
+    if (!in_array($action, ['start','stop','restart','status','drivers'], true)) return ['rc'=>2,'output'=>'invalid action'];
     $out = []; $rc = 0;
     @exec(escapeshellarg(SFC_RC) . ' ' . escapeshellarg($action) . ' 2>&1', $out, $rc);
     return ['rc' => $rc, 'output' => implode("\n", $out)];
@@ -228,9 +359,24 @@ $action = (string)($_POST['action'] ?? $_GET['action'] ?? 'status');
 
 switch ($action) {
     case 'scan':
-        respond(['ok' => true, 'hardware' => scanHardware(), 'config' => readJson(SFC_CONFIG, defaultConfig())]);
+        respond(['ok' => true, 'hardware' => scanHardware(), 'config' => readJson(SFC_CONFIG, defaultConfig()), 'drivers' => driverInfo()]);
     case 'status':
-        respond(['ok' => true, 'running' => daemonRunning(), 'status' => readJson(SFC_STATUS, []), 'config' => readJson(SFC_CONFIG, defaultConfig())]);
+        respond(['ok' => true, 'running' => daemonRunning(), 'status' => readJson(SFC_STATUS, []), 'config' => readJson(SFC_CONFIG, defaultConfig()), 'drivers' => driverInfo()]);
+    case 'driver_info':
+        respond(['ok' => true, 'drivers' => driverInfo()]);
+    case 'driver_detect':
+        $detected = detectDrivers();
+        if (empty($detected['ok'])) respond($detected, 500);
+        respond(['ok' => true, 'detected' => $detected, 'drivers' => driverInfo($detected['modules'])]);
+    case 'driver_save':
+        $modules = sanitizeModules((string)($_POST['modules'] ?? ''));
+        if (!$modules) respond(['ok' => false, 'error' => '至少需要一个有效的驱动模块名称。'], 400);
+        foreach ($modules as $module) {
+            if (!moduleAvailable($module)) respond(['ok' => false, 'error' => '驱动模块不可用：' . $module], 400);
+        }
+        if (!writeDrivers($modules)) respond(['ok' => false, 'error' => '无法写入 drivers.conf'], 500);
+        $load = runRc('drivers');
+        respond(['ok' => $load['rc'] === 0, 'drivers' => driverInfo(), 'service' => $load, 'hardware' => scanHardware()]);
     case 'save':
         $payload = json_decode((string)($_POST['payload'] ?? ''), true);
         if (!is_array($payload)) respond(['ok' => false, 'error' => 'Invalid JSON payload'], 400);

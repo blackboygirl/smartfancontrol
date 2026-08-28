@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.6 (Beta)
+- Add independent sensor-driver auto-detection using the local `sensors-detect --auto` workflow used by lm-sensors/Dynamix System Temperature.
+- Add a WebGUI **Sensor Drivers** panel with auto-detect, editable module list, save/load, and loaded/available status.
+- Validate detected/saved module names and verify each module with `modprobe` before persisting it.
+- Automatically rescan PWM/RPM/temperature hardware after saving and loading drivers.
+- Keep the v0.1.5 Dynamix `drivers.conf` import only as an optional one-time migration; new/clean installs no longer need Dynamix System Temperature to discover drivers.
+- Report clearly when `sensors-detect` or Perl is unavailable instead of silently depending on another plugin.
+- Preserve all existing Tesla P4/NVIDIA, multi-PWM, fan-curve, fail-safe, online-update, and Unraid 7.x behavior.
+
 ## 0.1.5 (Beta)
 - Add persistent sensor-driver management at `/boot/config/plugins/smartfancontrol/drivers.conf`.
 - On first 0.1.5 install, automatically import the proven driver list from Dynamix System Temperature when available.

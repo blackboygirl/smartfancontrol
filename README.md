@@ -15,6 +15,8 @@ Smart Fan Control is an Unraid plugin for controlling one or more Linux `hwmon` 
 - Unraid WebGUI integration under **Settings -> User Utilities**
 - Native Unraid plugin update checking through `pluginURL`
 - Persistent hwmon sensor-driver loading via `drivers.conf`
+- Independent **Auto Detect Drivers** workflow using local `sensors-detect --auto`
+- Driver status/validation in the Unraid WebGUI; Dynamix System Temperature is not required
 
 ## Safety
 
@@ -46,7 +48,7 @@ Sensor driver modules are stored separately in:
 /boot/config/plugins/smartfancontrol/drivers.conf
 ```
 
-On the first upgrade to v0.1.5, Smart Fan Control imports the existing Dynamix System Temperature `drivers.conf` when present. This lets the plugin load modules such as `coretemp` and `nct6775` by itself on future Unraid boots.
+On upgrades, Smart Fan Control can import an existing Dynamix System Temperature `drivers.conf` once as a convenience. Starting with v0.1.6 this is no longer required: **Settings -> User Utilities -> Smart Fan Control -> Sensor Drivers -> Auto Detect Drivers** runs the local `sensors-detect --auto` workflow, validates the recommended kernel modules, and lets you save/load them into Smart Fan Control's own `drivers.conf`. Automatic detection requires the `sensors-detect` script and Perl to be available on the Unraid host.
 
 ## Recommended initial Tesla P4 curve
 

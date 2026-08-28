@@ -2,7 +2,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name "smartfancontrol">
 <!ENTITY author "blackboygirl">
-<!ENTITY version "0.1.5">
+<!ENTITY version "0.1.6">
 <!ENTITY launch "Settings/SmartFanControl">
 <!ENTITY github "blackboygirl/smartfancontrol">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/blackboygirl/smartfancontrol/main/smartfancontrol.plg">
@@ -11,6 +11,15 @@
 <CHANGES>
 <![CDATA[
 # Changelog
+
+## 0.1.6 (Beta)
+- Add independent sensor-driver auto-detection using the local `sensors-detect --auto` workflow used by lm-sensors/Dynamix System Temperature.
+- Add a WebGUI **Sensor Drivers** panel with auto-detect, editable module list, save/load, and loaded/available status.
+- Validate detected/saved module names and verify each module with `modprobe` before persisting it.
+- Automatically rescan PWM/RPM/temperature hardware after saving and loading drivers.
+- Keep the v0.1.5 Dynamix `drivers.conf` import only as an optional one-time migration; new/clean installs no longer need Dynamix System Temperature to discover drivers.
+- Report clearly when `sensors-detect` or Perl is unavailable instead of silently depending on another plugin.
+- Preserve all existing Tesla P4/NVIDIA, multi-PWM, fan-curve, fail-safe, online-update, and Unraid 7.x behavior.
 
 ## 0.1.5 (Beta)
 - Add persistent sensor-driver management at `/boot/config/plugins/smartfancontrol/drivers.conf`.
@@ -96,12 +105,35 @@ if ($csrf === '') {
 .sfc-warning{border-left:4px solid #f0a000;padding:8px 12px;margin:12px 0;background:rgba(240,160,0,.08)}
 .sfc-empty{padding:28px;text-align:center;color:#777;border:1px dashed #bbb;border-radius:5px}
 .sfc-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sfc-danger{color:#b71c1c}
+.sfc-driver-card{border:1px solid #c8c8c8;border-radius:5px;padding:14px 16px;margin:12px 0 18px;background:rgba(255,255,255,.03)}
+.sfc-driver-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}.sfc-driver-head .grow{flex:1}
+.sfc-driver-card textarea{width:100%;min-height:76px;font-family:monospace;resize:vertical}
+.sfc-driver-status{margin-top:10px;color:#666}.sfc-driver-row{display:inline-block;margin:3px 12px 3px 0}.sfc-driver-ok{color:#43a047}.sfc-driver-warn{color:#d98200}
 @media(max-width:760px){.sfc-grid{grid-template-columns:1fr}.sfc-live{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 
 <div id="sfc-root">
   <div class="sfc-warning">
     <b>安全提示：</b>此插件会直接写入 Linux hwmon PWM 控制接口。建议 CPU 风扇继续交给 BIOS；GPU/机箱风扇首次启用时请现场观察转速和温度。温度源失联、达到临界温度或检测到停转时会按 Fail-safe 设置提升风扇转速。
+  </div>
+
+  <div class="sfc-driver-card">
+    <div class="sfc-driver-head">
+      <b>传感器驱动</b>
+      <span class="grow"></span>
+      <span id="sfc-driver-capability">正在读取检测能力…</span>
+    </div>
+    <div class="sfc-field">
+      <label>驱动模块（每行一个）</label>
+      <textarea id="sfc-drivers" spellcheck="false" placeholder="例如：&#10;coretemp&#10;nct6775"></textarea>
+      <small>“自动检测驱动”直接调用本机 <code>sensors-detect --auto</code>，与 Dynamix System Temperature 使用同一类 lm-sensors 检测机制；检测结果需要点击“保存并加载驱动”才会写入 Smart Fan Control 自己的 drivers.conf。</small>
+    </div>
+    <div class="sfc-actions" style="margin-top:10px">
+      <input type="button" id="sfc-driver-detect" value="自动检测驱动">
+      <input type="button" id="sfc-driver-save" value="保存并加载驱动">
+      <input type="button" id="sfc-driver-refresh" value="刷新驱动状态">
+    </div>
+    <div id="sfc-driver-status" class="sfc-driver-status"></div>
   </div>
 
   <div class="sfc-toolbar">
@@ -132,6 +164,7 @@ const api='/plugins/smartfancontrol/api.php';
 let hw={pwms:[],fans:[],temps:[],gpus:[]};
 let cfg={version:1,enabled:false,interval:5,profiles:[]};
 let lastStatus={};
+let driverInfo={modules:[],status:[],detect_available:false,sensors_detect:'',perl:''};
 let pollTimer=null;
 
 const $=s=>root.querySelector(s);
@@ -149,6 +182,26 @@ function defaultProfile(){return {id:uid(),name:'新风扇控制器',enabled:tru
 function optionHtml(items,selected,placeholder){let out='<option value="">'+esc(placeholder)+'</option>';items.forEach(x=>{out+='<option value="'+esc(x.id)+'" '+(x.id===selected?'selected':'')+'>'+esc(x.label)+(x.rpm!=null?' — '+x.rpm+' RPM':'')+'</option>'});if(selected&&!items.some(x=>x.id===selected))out+='<option selected value="'+esc(selected)+'">已保存（当前未检测到）</option>';return out;}
 function sensorRows(profile){const selected=new Set((profile.sensors||[]).map(sensorId));const catalog=allSensors().slice();(profile.sensors||[]).forEach(s=>{const id=sensorId(s);if(id&&!catalog.some(x=>x.id===id))catalog.push({...s,id,label:(s.label||id)+'（当前不可用）',temp:null});});if(!catalog.length)return'<div style="padding:8px;color:#777">未检测到可用温度传感器</div>';return catalog.map(s=>'<label class="sfc-sensor-row"><input type="checkbox" class="sensor-check" value="'+esc(s.id)+'" '+(selected.has(s.id)?'checked':'')+'><span>'+esc(s.label)+'</span><span class="sfc-sensor-temp">'+(s.temp==null?'--':esc(s.temp)+' °C')+'</span></label>').join('');}
 function curveRows(curve){return (curve||[]).map((pt,i)=>'<tr><td><input class="curve-temp" type="number" step="1" value="'+esc(pt.temp)+'"></td><td><input class="curve-pwm" type="number" min="0" max="100" step="1" value="'+esc(pt.pwm)+'"></td><td><button type="button" class="sfc-mini-btn curve-del" data-i="'+i+'">删除</button></td></tr>').join('');}
+function renderDriverInfo(info,writeEditor=false){
+  driverInfo=info||driverInfo||{};
+  const editor=$('#sfc-drivers');
+  if(writeEditor&&editor)editor.value=(driverInfo.modules||[]).join('\n');
+  const cap=$('#sfc-driver-capability');
+  if(cap){
+    if(driverInfo.detect_available)cap.innerHTML='<span class="sfc-driver-ok">✓ sensors-detect 可用</span>';
+    else if(!driverInfo.sensors_detect)cap.innerHTML='<span class="sfc-driver-warn">sensors-detect 不可用</span>';
+    else cap.innerHTML='<span class="sfc-driver-warn">缺少 Perl，无法自动检测</span>';
+  }
+  const st=$('#sfc-driver-status');
+  if(st){
+    const rows=(driverInfo.status||[]).map(x=>'<span class="sfc-driver-row '+(x.loaded?'sfc-driver-ok':'sfc-driver-warn')+'">'+esc(x.name)+'：'+(x.loaded?'已加载':(x.available?'可加载':'不可用'))+'</span>');
+    st.innerHTML=rows.length?rows.join(''):'尚未保存传感器驱动。可以点击“自动检测驱动”。';
+  }
+  const detect=$('#sfc-driver-detect');if(detect)detect.disabled=!driverInfo.detect_available;
+}
+async function refreshDrivers(writeEditor=true){try{const d=await post('driver_info');renderDriverInfo(d.drivers||{},writeEditor);}catch(e){msg('读取驱动状态失败：'+e.message,false)}}
+async function detectDrivers(){const btn=$('#sfc-driver-detect');try{btn.disabled=true;btn.value='正在检测…';const d=await post('driver_detect');const mods=(d.detected?.modules||[]);$('#sfc-drivers').value=mods.join('\n');renderDriverInfo(d.drivers||{},false);msg('检测完成：'+mods.join(', ')+'。确认后点击“保存并加载驱动”。');}catch(e){msg('驱动检测失败：'+e.message,false)}finally{btn.value='自动检测驱动';btn.disabled=!driverInfo.detect_available}}
+async function saveDrivers(){try{const text=$('#sfc-drivers').value;const d=await post('driver_save',{modules:text});driverInfo=d.drivers||driverInfo;if(d.hardware)hw=d.hardware;renderDriverInfo(driverInfo,true);render();msg('驱动已保存并加载，硬件已重新扫描。');}catch(e){msg('保存驱动失败：'+e.message,false)}}
 function profileStatus(id){return (lastStatus.profiles||{})[id]||{};}
 function render(){
   $('#sfc-global-enabled').checked=!!cfg.enabled;$('#sfc-interval').value=cfg.interval||5;
@@ -200,10 +253,13 @@ function syncFromDom(){
 async function scan(show=true){try{syncFromDom();const d=await post('scan');hw=d.hardware||hw;if(d.config&&cfg.profiles.length===0)cfg=d.config;render();if(show)msg(`扫描完成：${hw.pwms.length} 个 PWM，${hw.fans.length} 个 RPM，${allSensors().length} 个温度源。`);}catch(e){msg('扫描失败：'+e.message,false)}}
 async function save(){try{syncFromDom();for(const p of cfg.profiles){if(p.enabled&&!p.pwm)throw new Error(`${p.name} 未选择 PWM 控制器`);if(p.enabled&&!p.sensors.length)throw new Error(`${p.name} 未选择温度传感器`);if(p.enabled&&p.curve.length<2)throw new Error(`${p.name} 至少需要 2 个曲线节点`);}const d=await post('save',{payload:JSON.stringify(cfg)});cfg=d.config||cfg;msg(cfg.enabled?'配置已保存，控制服务已重新启动。':'配置已保存，控制服务已停止并恢复 PWM 原控制模式。');await refreshStatus();}catch(e){msg('保存失败：'+e.message,false)}}
 async function refreshStatus(){try{const d=await post('status');lastStatus=d.status||{};const running=!!d.running;$('#sfc-dot').className='sfc-dot '+(running?'run':'stop');$('#sfc-service-text').textContent=running?'服务运行中':'服务未运行';root.querySelectorAll('.sfc-card').forEach(card=>{const st=(lastStatus.profiles||{})[card.dataset.id];if(!st)return;card.querySelector('.live-temp').textContent=st.temperature==null?'--':st.temperature+' °C';card.querySelector('.live-pwm').textContent=st.applied_pwm==null?'--':st.applied_pwm+'%';card.querySelector('.live-rpm').textContent=st.rpm==null?'--':st.rpm+' RPM';card.querySelector('.live-state').textContent=st.reason||st.state||'--';});}catch(e){$('#sfc-dot').className='sfc-dot stop';$('#sfc-service-text').textContent='状态读取失败';}}
+$('#sfc-driver-detect').addEventListener('click',detectDrivers);
+$('#sfc-driver-save').addEventListener('click',saveDrivers);
+$('#sfc-driver-refresh').addEventListener('click',()=>refreshDrivers(true));
 $('#sfc-add').addEventListener('click',()=>{syncFromDom();cfg.profiles.push(defaultProfile());render();});
 $('#sfc-scan').addEventListener('click',()=>scan(true));
 $('#sfc-save').addEventListener('click',save);
-async function init(){try{const d=await post('scan');hw=d.hardware||hw;cfg=d.config||cfg;render();await refreshStatus();}catch(e){render();msg('初始化失败：'+e.message,false);}pollTimer=setInterval(refreshStatus,5000);}
+async function init(){try{const d=await post('scan');hw=d.hardware||hw;cfg=d.config||cfg;driverInfo=d.drivers||driverInfo;renderDriverInfo(driverInfo,true);render();await refreshStatus();}catch(e){render();msg('初始化失败：'+e.message,false);}pollTimer=setInterval(refreshStatus,5000);}
 init();
 })();
 </script>
@@ -218,12 +274,13 @@ declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-const SFC_VERSION = '0.1.5';
+const SFC_VERSION = '0.1.6';
 const SFC_CONFIG = '/boot/config/plugins/smartfancontrol/config.json';
 const SFC_RUN = '/run/smartfancontrol';
 const SFC_STATUS = SFC_RUN . '/status.json';
 const SFC_PID = SFC_RUN . '/smartfancontrol.pid';
 const SFC_RC = '/etc/rc.d/rc.smartfancontrol';
+const SFC_DRIVERS = '/boot/config/plugins/smartfancontrol/drivers.conf';
 
 function respond(array $data, int $status = 200): never {
     http_response_code($status);
@@ -345,6 +402,136 @@ function scanHardware(): array {
     return ['pwms' => $pwms, 'fans' => $fans, 'temps' => $temps, 'gpus' => $gpus];
 }
 
+function commandPath(string $name): string {
+    if (!preg_match('/^[a-zA-Z0-9_.-]+$/', $name)) return '';
+    $out = []; $rc = 0;
+    @exec('command -v ' . escapeshellarg($name) . ' 2>/dev/null', $out, $rc);
+    if ($rc !== 0 || !$out) return '';
+    $path = trim((string)$out[0]);
+    return ($path !== '' && is_executable($path)) ? $path : '';
+}
+
+function sanitizeModules(mixed $value): array {
+    $items = is_array($value) ? $value : preg_split('/[\\s,;]+/', (string)$value, -1, PREG_SPLIT_NO_EMPTY);
+    $out = [];
+    foreach (($items ?: []) as $item) {
+        $module = trim((string)$item);
+        if ($module === '' || !preg_match('/^[a-zA-Z0-9_-]+$/', $module)) continue;
+        // Linux normalizes '-' to '_' in /sys/module; keep the module spelling returned by sensors-detect.
+        if (!in_array($module, $out, true)) $out[] = $module;
+        if (count($out) >= 64) break;
+    }
+    return $out;
+}
+
+function readDrivers(): array {
+    $raw = @file_get_contents(SFC_DRIVERS);
+    return $raw === false ? [] : sanitizeModules($raw);
+}
+
+function moduleLoaded(string $module): bool {
+    $sys = '/sys/module/' . str_replace('-', '_', $module);
+    return is_dir($sys);
+}
+
+function moduleAvailable(string $module): bool {
+    if (moduleLoaded($module)) return true;
+    $out = []; $rc = 0;
+    @exec('modprobe -n -q ' . escapeshellarg($module) . ' >/dev/null 2>&1', $out, $rc);
+    return $rc === 0;
+}
+
+function driverInfo(?array $modules = null): array {
+    $modules ??= readDrivers();
+    $detector = commandPath('sensors-detect');
+    $perl = commandPath('perl');
+    $status = [];
+    foreach ($modules as $module) {
+        $status[] = [
+            'name' => $module,
+            'loaded' => moduleLoaded($module),
+            'available' => moduleAvailable($module),
+        ];
+    }
+    return [
+        'modules' => array_values($modules),
+        'status' => $status,
+        'detect_available' => $detector !== '' && $perl !== '',
+        'sensors_detect' => $detector,
+        'perl' => $perl,
+    ];
+}
+
+function parseDetectedModules(string $text): array {
+    $found = [];
+
+    // Standard lm-sensors output contains lines such as: Driver `coretemp':
+    if (preg_match_all('/^Driver\\s+[`\\\'"]*([a-zA-Z0-9_-]+)[`\\\'"]*\\s*:/mi', $text, $m)) {
+        foreach ($m[1] as $module) $found[] = $module;
+    }
+
+    // Also understand the shell snippet emitted near the end of sensors-detect.
+    $inChipDrivers = false;
+    foreach (preg_split('/\\R/', $text) ?: [] as $line) {
+        $trim = trim($line);
+        if (preg_match('/^#\\s*Chip drivers\\s*$/i', $trim)) {
+            $inChipDrivers = true;
+            continue;
+        }
+        if (!$inChipDrivers) continue;
+        if ($trim === '') continue;
+        if (str_starts_with($trim, '#')) {
+            if (preg_match('/^#-+/', $trim)) break;
+            continue;
+        }
+        foreach (preg_split('/\\s+/', $trim) ?: [] as $token) {
+            if (preg_match('/^[a-zA-Z0-9_-]+$/', $token)) $found[] = $token;
+        }
+    }
+
+    $valid = [];
+    foreach (sanitizeModules($found) as $module) {
+        if (moduleAvailable($module)) $valid[] = $module;
+    }
+    sort($valid, SORT_STRING);
+    return array_values(array_unique($valid));
+}
+
+function detectDrivers(): array {
+    $detector = commandPath('sensors-detect');
+    $perl = commandPath('perl');
+    if ($detector === '') {
+        return ['ok' => false, 'error' => 'sensors-detect 不可用；当前 Unraid 未提供 lm-sensors 检测脚本。'];
+    }
+    if ($perl === '') {
+        return ['ok' => false, 'error' => 'Perl 不可用；sensors-detect 需要 Perl 才能执行自动检测。'];
+    }
+
+    $out = []; $rc = 0;
+    $timeout = commandPath('timeout');
+    $cmd = ($timeout !== '' ? escapeshellarg($timeout) . ' 90 ' : '')
+        . escapeshellarg($detector) . ' --auto 2>&1';
+    @exec($cmd, $out, $rc);
+    $text = implode("\\n", $out);
+    $modules = parseDetectedModules($text);
+    if (!$modules) {
+        $tail = trim(implode("\\n", array_slice($out, -12)));
+        $error = '自动检测完成，但没有找到可加载的 hwmon 驱动。';
+        if ($rc !== 0) $error .= ' sensors-detect 返回代码 ' . $rc . '。';
+        return ['ok' => false, 'error' => $error, 'rc' => $rc, 'output_tail' => $tail];
+    }
+    return ['ok' => true, 'modules' => $modules, 'rc' => $rc, 'output_tail' => trim(implode("\\n", array_slice($out, -12)))];
+}
+
+function writeDrivers(array $modules): bool {
+    @mkdir(dirname(SFC_DRIVERS), 0755, true);
+    $tmp = SFC_DRIVERS . '.tmp.' . getmypid();
+    $body = $modules ? implode("\\n", $modules) . "\\n" : '';
+    if (@file_put_contents($tmp, $body, LOCK_EX) === false) return false;
+    @chmod($tmp, 0644);
+    return @rename($tmp, SFC_DRIVERS);
+}
+
 function clampFloat(mixed $v, float $min, float $max, float $default): float {
     if (!is_numeric($v)) return $default;
     return max($min, min($max, (float)$v));
@@ -431,7 +618,7 @@ function daemonRunning(): bool {
 }
 
 function runRc(string $action): array {
-    if (!in_array($action, ['start','stop','restart','status'], true)) return ['rc'=>2,'output'=>'invalid action'];
+    if (!in_array($action, ['start','stop','restart','status','drivers'], true)) return ['rc'=>2,'output'=>'invalid action'];
     $out = []; $rc = 0;
     @exec(escapeshellarg(SFC_RC) . ' ' . escapeshellarg($action) . ' 2>&1', $out, $rc);
     return ['rc' => $rc, 'output' => implode("\n", $out)];
@@ -441,9 +628,24 @@ $action = (string)($_POST['action'] ?? $_GET['action'] ?? 'status');
 
 switch ($action) {
     case 'scan':
-        respond(['ok' => true, 'hardware' => scanHardware(), 'config' => readJson(SFC_CONFIG, defaultConfig())]);
+        respond(['ok' => true, 'hardware' => scanHardware(), 'config' => readJson(SFC_CONFIG, defaultConfig()), 'drivers' => driverInfo()]);
     case 'status':
-        respond(['ok' => true, 'running' => daemonRunning(), 'status' => readJson(SFC_STATUS, []), 'config' => readJson(SFC_CONFIG, defaultConfig())]);
+        respond(['ok' => true, 'running' => daemonRunning(), 'status' => readJson(SFC_STATUS, []), 'config' => readJson(SFC_CONFIG, defaultConfig()), 'drivers' => driverInfo()]);
+    case 'driver_info':
+        respond(['ok' => true, 'drivers' => driverInfo()]);
+    case 'driver_detect':
+        $detected = detectDrivers();
+        if (empty($detected['ok'])) respond($detected, 500);
+        respond(['ok' => true, 'detected' => $detected, 'drivers' => driverInfo($detected['modules'])]);
+    case 'driver_save':
+        $modules = sanitizeModules((string)($_POST['modules'] ?? ''));
+        if (!$modules) respond(['ok' => false, 'error' => '至少需要一个有效的驱动模块名称。'], 400);
+        foreach ($modules as $module) {
+            if (!moduleAvailable($module)) respond(['ok' => false, 'error' => '驱动模块不可用：' . $module], 400);
+        }
+        if (!writeDrivers($modules)) respond(['ok' => false, 'error' => '无法写入 drivers.conf'], 500);
+        $load = runRc('drivers');
+        respond(['ok' => $load['rc'] === 0, 'drivers' => driverInfo(), 'service' => $load, 'hardware' => scanHardware()]);
     case 'save':
         $payload = json_decode((string)($_POST['payload'] ?? ''), true);
         if (!is_array($payload)) respond(['ok' => false, 'error' => 'Invalid JSON payload'], 400);
@@ -485,7 +687,7 @@ switch ($action) {
 
 declare(strict_types=1);
 
-const SFC_VERSION = '0.1.5';
+const SFC_VERSION = '0.1.6';
 
 function envp(string $name, string $default): string {
     $v = getenv($name);
@@ -1300,10 +1502,10 @@ if [[ ! -f "$PERSIST/config.json" ]]; then
 fi
 chmod 0644 "$PERSIST/config.json"
 
-# One-time migration of sensor driver modules. If Dynamix System Temperature is
-# installed, import its proven module list so Smart Fan Control can take over
-# driver loading on future boots. Otherwise preserve any currently loaded
-# common hwmon drivers as a best-effort starting point.
+# Optional one-time migration for upgrades. v0.1.6 can discover drivers itself via
+# sensors-detect from the WebGUI, so Dynamix System Temperature is not required.
+# If a proven Dynamix list exists, import it as a convenience; otherwise preserve
+# currently loaded common hwmon drivers as a best-effort starting point.
 if [[ ! -f "$DRIVERS" ]]; then
   if [[ -s "$DYNAMIX_DRIVERS" ]]; then
     awk 'NF && $1 !~ /^#/ {gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "") print $0}' "$DYNAMIX_DRIVERS" > "$DRIVERS"
@@ -1321,10 +1523,10 @@ fi
 chmod 0644 "$DRIVERS"
 
 /etc/rc.d/rc.smartfancontrol start >/dev/null 2>&1 || true
-logger -t smartfancontrol "Smart Fan Control 0.1.5 installed"
+logger -t smartfancontrol "Smart Fan Control 0.1.6 installed"
 echo ""
 echo "-----------------------------------------------------------"
-echo " Smart Fan Control 0.1.5 (Beta) installed"
+echo " Smart Fan Control 0.1.6 (Beta) installed"
 echo " Sensor driver config: $DRIVERS"
 echo " Open Settings -> User Utilities -> Smart Fan Control to configure it."
 echo "-----------------------------------------------------------"

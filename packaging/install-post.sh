@@ -12,10 +12,10 @@ if [[ ! -f "$PERSIST/config.json" ]]; then
 fi
 chmod 0644 "$PERSIST/config.json"
 
-# One-time migration of sensor driver modules. If Dynamix System Temperature is
-# installed, import its proven module list so Smart Fan Control can take over
-# driver loading on future boots. Otherwise preserve any currently loaded
-# common hwmon drivers as a best-effort starting point.
+# Optional one-time migration for upgrades. v0.1.6 can discover drivers itself via
+# sensors-detect from the WebGUI, so Dynamix System Temperature is not required.
+# If a proven Dynamix list exists, import it as a convenience; otherwise preserve
+# currently loaded common hwmon drivers as a best-effort starting point.
 if [[ ! -f "$DRIVERS" ]]; then
   if [[ -s "$DYNAMIX_DRIVERS" ]]; then
     awk 'NF && $1 !~ /^#/ {gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "") print $0}' "$DYNAMIX_DRIVERS" > "$DRIVERS"
