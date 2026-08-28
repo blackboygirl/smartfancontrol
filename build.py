@@ -48,7 +48,7 @@ parts = [
     f'<!ENTITY github "{GITHUB}">',
     f'<!ENTITY pluginURL "{PLUGIN_URL}">',
     ']>',
-    f'<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" min="6.12.0" support="{SUPPORT_URL}" icon="fan">',
+    f'<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" min="6.12.0" support="{SUPPORT_URL}" icon="icon-fan">',
     '<CHANGES>',
     cdata(changelog),
     '</CHANGES>',

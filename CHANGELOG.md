@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.4 (Beta)
+- Fix the Plugins page icon on Unraid 7.x by using the native `icon-fan` glyph instead of unsupported `fa-fan`.
+
 ## 0.1.3 (Beta)
 - Add a canonical GitHub `pluginURL` so Unraid can check for updates and no longer shows the plugin as unavailable after publication.
 - Add GitHub Issues support URL and a native Unraid fan icon in the Plugins page.

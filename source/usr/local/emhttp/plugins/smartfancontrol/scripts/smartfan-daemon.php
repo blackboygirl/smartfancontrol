@@ -10,7 +10,7 @@
 
 declare(strict_types=1);
 
-const SFC_VERSION = '0.1.3';
+const SFC_VERSION = '0.1.4';
 
 function envp(string $name, string $default): string {
     $v = getenv($name);

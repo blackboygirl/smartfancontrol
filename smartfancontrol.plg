@@ -2,15 +2,18 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name "smartfancontrol">
 <!ENTITY author "blackboygirl">
-<!ENTITY version "0.1.3">
+<!ENTITY version "0.1.4">
 <!ENTITY launch "Settings/SmartFanControl">
 <!ENTITY github "blackboygirl/smartfancontrol">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/blackboygirl/smartfancontrol/main/smartfancontrol.plg">
 ]>
-<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" min="6.12.0" support="https://github.com/blackboygirl/smartfancontrol/issues" icon="fan">
+<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" min="6.12.0" support="https://github.com/blackboygirl/smartfancontrol/issues" icon="icon-fan">
 <CHANGES>
 <![CDATA[
 # Changelog
+
+## 0.1.4 (Beta)
+- Fix the Plugins page icon on Unraid 7.x by using the native `icon-fan` glyph instead of unsupported `fa-fan`.
 
 ## 0.1.3 (Beta)
 - Add a canonical GitHub `pluginURL` so Unraid can check for updates and no longer shows the plugin as unavailable after publication.
@@ -207,7 +210,7 @@ declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-const SFC_VERSION = '0.1.3';
+const SFC_VERSION = '0.1.4';
 const SFC_CONFIG = '/boot/config/plugins/smartfancontrol/config.json';
 const SFC_RUN = '/run/smartfancontrol';
 const SFC_STATUS = SFC_RUN . '/status.json';
@@ -474,7 +477,7 @@ switch ($action) {
 
 declare(strict_types=1);
 
-const SFC_VERSION = '0.1.3';
+const SFC_VERSION = '0.1.4';
 
 function envp(string $name, string $default): string {
     $v = getenv($name);
@@ -1214,10 +1217,10 @@ if [[ ! -f /boot/config/plugins/smartfancontrol/config.json ]]; then
 fi
 chmod 0644 /boot/config/plugins/smartfancontrol/config.json
 /etc/rc.d/rc.smartfancontrol start >/dev/null 2>&1 || true
-logger -t smartfancontrol "Smart Fan Control 0.1.3 installed"
+logger -t smartfancontrol "Smart Fan Control 0.1.4 installed"
 echo ""
 echo "-----------------------------------------------------------"
-echo " Smart Fan Control 0.1.3 (Beta) installed"
+echo " Smart Fan Control 0.1.4 (Beta) installed"
 echo " Open Settings -> User Utilities -> Smart Fan Control to configure it."
 echo "-----------------------------------------------------------"
 echo ""
