@@ -313,7 +313,7 @@ function detectDrivers(): array {
 function writeDrivers(array $modules): bool {
     @mkdir(dirname(SFC_DRIVERS), 0755, true);
     $tmp = SFC_DRIVERS . '.tmp.' . getmypid();
-    $body = $modules ? implode("\\n", $modules) . "\\n" : '';
+    $body = $modules ? implode("\n", $modules) . "\n" : '';
     if (@file_put_contents($tmp, $body, LOCK_EX) === false) return false;
     @chmod($tmp, 0644);
     return @rename($tmp, SFC_DRIVERS);

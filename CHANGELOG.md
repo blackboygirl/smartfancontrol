@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.8 (Beta)
+- Fix `drivers.conf` persistence: write real newline-separated module names instead of literal `\n` sequences.
+- Make sensor-driver loading return a failure when any configured `modprobe` fails, so the WebGUI no longer reports a false successful save/load.
+- Include the actual `modprobe` error in diagnostics/log output to make hardware-driver failures actionable.
+
 ## 0.1.7 (Beta)
 - Fix automatic driver detection when `sensors-detect --auto` returns no recommendations because hwmon drivers are already loaded/bound.
 - Make lm-sensors output parsing more tolerant across old/new `sensors-detect` formats, including both plain module lists and `modprobe` snippets.

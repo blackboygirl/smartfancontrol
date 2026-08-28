@@ -11,22 +11,25 @@ DRIVERS="/boot/config/plugins/$NAME/drivers.conf"
 
 load_hwmon_drivers() {
   [[ -f "$DRIVERS" ]] || return 0
-  local module line
+  local module line err
+  local failed=0
   while IFS= read -r line || [[ -n "$line" ]]; do
     # Strip comments and surrounding whitespace; drivers.conf intentionally
     # stores module names only (one per line).
     module="${line%%#*}"
     module="$(echo "$module" | xargs 2>/dev/null)"
     [[ -n "$module" ]] || continue
-    if modprobe "$module" >/dev/null 2>&1; then
+    if err="$(modprobe "$module" 2>&1)"; then
       :
     else
-      echo "warning: failed to load hwmon module $module" >&2
-      logger -t smartfancontrol "Failed to load hwmon module: $module"
+      failed=1
+      echo "warning: failed to load hwmon module $module${err:+: $err}" >&2
+      logger -t smartfancontrol "Failed to load hwmon module: $module${err:+: $err}"
     fi
   done < "$DRIVERS"
   # Give hwmon sysfs nodes a short moment to appear before the daemon scans.
   sleep 0.2
+  return "$failed"
 }
 
 is_running() {

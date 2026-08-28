@@ -18,6 +18,10 @@ Smart Fan Control is an Unraid plugin for controlling one or more Linux `hwmon` 
 - Independent **Auto Detect Drivers** workflow using local `sensors-detect --auto`
 - Driver status/validation in the Unraid WebGUI; Dynamix System Temperature is not required
 
+## Sensor driver discovery
+
+Smart Fan Control can detect hwmon driver modules with local `sensors-detect --auto`, persist one module per line in `/boot/config/plugins/smartfancontrol/drivers.conf`, and load them with `modprobe` on startup.
+
 ## Safety
 
 This plugin writes directly to Linux hwmon PWM controls. Prefer BIOS control for CPU cooling. For GPU/chassis fans, verify the PWM/RPM mapping and observe fan speed and temperature during the first enable. Configure a 100% fail-safe.
