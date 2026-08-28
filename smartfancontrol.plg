@@ -2,7 +2,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name "smartfancontrol">
 <!ENTITY author "blackboygirl">
-<!ENTITY version "0.1.4">
+<!ENTITY version "0.1.5">
 <!ENTITY launch "Settings/SmartFanControl">
 <!ENTITY github "blackboygirl/smartfancontrol">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/blackboygirl/smartfancontrol/main/smartfancontrol.plg">
@@ -12,13 +12,21 @@
 <![CDATA[
 # Changelog
 
+## 0.1.5 (Beta)
+- Add persistent sensor-driver management at `/boot/config/plugins/smartfancontrol/drivers.conf`.
+- On first 0.1.5 install, automatically import the proven driver list from Dynamix System Temperature when available.
+- Load configured hwmon modules with `modprobe` whenever Smart Fan Control starts, including at Unraid boot.
+- Add `rc.smartfancontrol drivers` for manually reloading configured sensor modules.
+- Extend diagnostics to show configured sensor drivers and whether each module is currently loaded.
+- Keep driver modules loaded on plugin stop/remove to avoid disrupting other hwmon users.
+- Preserve all v0.1.4 online-update, native icon, Unraid 7.x CSRF, multi-PWM, NVIDIA/Tesla P4, curve and fail-safe behavior.
+
 ## 0.1.4 (Beta)
-- Fix the Plugins page icon on Unraid 7.x by using the native `icon-fan` glyph instead of unsupported `fa-fan`.
+- Fix the Plugins page icon by using Unraid's native `icon-fan` glyph instead of unavailable `fa-fan`.
 
 ## 0.1.3 (Beta)
-- Add a canonical GitHub `pluginURL` so Unraid can check for updates and no longer shows the plugin as unavailable after publication.
-- Add GitHub Issues support URL and a native Unraid fan icon in the Plugins page.
-- Set the GitHub repository owner as the plugin author for clearer ownership.
+- Add a canonical GitHub `pluginURL` so Unraid can check for updates.
+- Add GitHub Issues support URL and plugin ownership metadata.
 - Add a maintainable source tree and reproducible PLG build script.
 - Preserve all v0.1.2 runtime refresh, Unraid 7.x CSRF, multi-PWM, Tesla P4/NVIDIA sensor, curve and fail-safe behavior.
 
@@ -210,7 +218,7 @@ declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-const SFC_VERSION = '0.1.4';
+const SFC_VERSION = '0.1.5';
 const SFC_CONFIG = '/boot/config/plugins/smartfancontrol/config.json';
 const SFC_RUN = '/run/smartfancontrol';
 const SFC_STATUS = SFC_RUN . '/status.json';
@@ -477,7 +485,7 @@ switch ($action) {
 
 declare(strict_types=1);
 
-const SFC_VERSION = '0.1.4';
+const SFC_VERSION = '0.1.5';
 
 function envp(string $name, string $default): string {
     $v = getenv($name);
@@ -980,6 +988,27 @@ CONFIG="/boot/config/plugins/$NAME/config.json"
 RUN_DIR="/run/$NAME"
 PID_FILE="$RUN_DIR/$NAME.pid"
 LOG="/var/log/$NAME.log"
+DRIVERS="/boot/config/plugins/$NAME/drivers.conf"
+
+load_hwmon_drivers() {
+  [[ -f "$DRIVERS" ]] || return 0
+  local module line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # Strip comments and surrounding whitespace; drivers.conf intentionally
+    # stores module names only (one per line).
+    module="${line%%#*}"
+    module="$(echo "$module" | xargs 2>/dev/null)"
+    [[ -n "$module" ]] || continue
+    if modprobe "$module" >/dev/null 2>&1; then
+      :
+    else
+      echo "warning: failed to load hwmon module $module" >&2
+      logger -t smartfancontrol "Failed to load hwmon module: $module"
+    fi
+  done < "$DRIVERS"
+  # Give hwmon sysfs nodes a short moment to appear before the daemon scans.
+  sleep 0.2
+}
 
 is_running() {
   if [[ -f "$PID_FILE" ]]; then
@@ -994,6 +1023,7 @@ is_running() {
 
 start_service() {
   mkdir -p "$RUN_DIR" /boot/config/plugins/$NAME
+  load_hwmon_drivers
   if is_running; then
     echo "$NAME already running"
     return 0
@@ -1056,11 +1086,12 @@ status_service() {
 
 case "${1:-status}" in
   start) start_service ;;
+  drivers) load_hwmon_drivers ;;
   stop) stop_service ;;
   restart) stop_service; start_service ;;
   status) status_service ;;
   restore) "$DAEMON" --restore ;;
-  *) echo "Usage: $0 {start|stop|restart|status|restore}"; exit 2 ;;
+  *) echo "Usage: $0 {start|stop|restart|status|restore|drivers}"; exit 2 ;;
 esac
 ]]></INLINE>
 </FILE>
@@ -1075,6 +1106,29 @@ echo
 
 echo "[Service]"
 /etc/rc.d/rc.smartfancontrol status 2>&1
+echo
+
+echo "[Configured sensor drivers]"
+if [[ -f /boot/config/plugins/smartfancontrol/drivers.conf ]]; then
+  cat /boot/config/plugins/smartfancontrol/drivers.conf
+else
+  echo "No drivers.conf"
+fi
+echo
+
+echo "[Sensor driver module status]"
+if [[ -f /boot/config/plugins/smartfancontrol/drivers.conf ]]; then
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    module="${line%%#*}"
+    module="$(echo "$module" | xargs 2>/dev/null)"
+    [[ -n "$module" ]] || continue
+    if lsmod | awk '{print $1}' | grep -qx "$module"; then
+      echo "$module: loaded"
+    else
+      echo "$module: not loaded"
+    fi
+  done < /boot/config/plugins/smartfancontrol/drivers.conf
+fi
 echo
 
 echo "[NVIDIA]"
@@ -1123,6 +1177,27 @@ CONFIG="/boot/config/plugins/$NAME/config.json"
 RUN_DIR="/run/$NAME"
 PID_FILE="$RUN_DIR/$NAME.pid"
 LOG="/var/log/$NAME.log"
+DRIVERS="/boot/config/plugins/$NAME/drivers.conf"
+
+load_hwmon_drivers() {
+  [[ -f "$DRIVERS" ]] || return 0
+  local module line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # Strip comments and surrounding whitespace; drivers.conf intentionally
+    # stores module names only (one per line).
+    module="${line%%#*}"
+    module="$(echo "$module" | xargs 2>/dev/null)"
+    [[ -n "$module" ]] || continue
+    if modprobe "$module" >/dev/null 2>&1; then
+      :
+    else
+      echo "warning: failed to load hwmon module $module" >&2
+      logger -t smartfancontrol "Failed to load hwmon module: $module"
+    fi
+  done < "$DRIVERS"
+  # Give hwmon sysfs nodes a short moment to appear before the daemon scans.
+  sleep 0.2
+}
 
 is_running() {
   if [[ -f "$PID_FILE" ]]; then
@@ -1137,6 +1212,7 @@ is_running() {
 
 start_service() {
   mkdir -p "$RUN_DIR" /boot/config/plugins/$NAME
+  load_hwmon_drivers
   if is_running; then
     echo "$NAME already running"
     return 0
@@ -1199,11 +1275,12 @@ status_service() {
 
 case "${1:-status}" in
   start) start_service ;;
+  drivers) load_hwmon_drivers ;;
   stop) stop_service ;;
   restart) stop_service; start_service ;;
   status) status_service ;;
   restore) "$DAEMON" --restore ;;
-  *) echo "Usage: $0 {start|stop|restart|status|restore}"; exit 2 ;;
+  *) echo "Usage: $0 {start|stop|restart|status|restore|drivers}"; exit 2 ;;
 esac
 ]]></INLINE>
 </FILE>
@@ -1211,16 +1288,44 @@ esac
 <INLINE><![CDATA[
 #!/bin/bash
 set -u
-mkdir -p /boot/config/plugins/smartfancontrol /run/smartfancontrol
-if [[ ! -f /boot/config/plugins/smartfancontrol/config.json ]]; then
-  cp /usr/local/emhttp/plugins/smartfancontrol/default.json /boot/config/plugins/smartfancontrol/config.json
+NAME="smartfancontrol"
+PERSIST="/boot/config/plugins/$NAME"
+DRIVERS="$PERSIST/drivers.conf"
+DYNAMIX_DRIVERS="/boot/config/plugins/dynamix.system.temp/drivers.conf"
+
+mkdir -p "$PERSIST" /run/$NAME
+
+if [[ ! -f "$PERSIST/config.json" ]]; then
+  cp /usr/local/emhttp/plugins/$NAME/default.json "$PERSIST/config.json"
 fi
-chmod 0644 /boot/config/plugins/smartfancontrol/config.json
+chmod 0644 "$PERSIST/config.json"
+
+# One-time migration of sensor driver modules. If Dynamix System Temperature is
+# installed, import its proven module list so Smart Fan Control can take over
+# driver loading on future boots. Otherwise preserve any currently loaded
+# common hwmon drivers as a best-effort starting point.
+if [[ ! -f "$DRIVERS" ]]; then
+  if [[ -s "$DYNAMIX_DRIVERS" ]]; then
+    awk 'NF && $1 !~ /^#/ {gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "") print $0}' "$DYNAMIX_DRIVERS" > "$DRIVERS"
+    logger -t smartfancontrol "Imported sensor drivers from Dynamix System Temperature"
+  else
+    : > "$DRIVERS"
+    for module in coretemp nct6775 k10temp zenpower it87 drivetemp jc42; do
+      if lsmod | awk '{print $1}' | grep -qx "$module"; then
+        echo "$module" >> "$DRIVERS"
+      fi
+    done
+    logger -t smartfancontrol "Created sensor driver list from currently loaded modules"
+  fi
+fi
+chmod 0644 "$DRIVERS"
+
 /etc/rc.d/rc.smartfancontrol start >/dev/null 2>&1 || true
-logger -t smartfancontrol "Smart Fan Control 0.1.4 installed"
+logger -t smartfancontrol "Smart Fan Control 0.1.5 installed"
 echo ""
 echo "-----------------------------------------------------------"
-echo " Smart Fan Control 0.1.4 (Beta) installed"
+echo " Smart Fan Control 0.1.5 (Beta) installed"
+echo " Sensor driver config: $DRIVERS"
 echo " Open Settings -> User Utilities -> Smart Fan Control to configure it."
 echo "-----------------------------------------------------------"
 echo ""

@@ -9,6 +9,29 @@ echo "[Service]"
 /etc/rc.d/rc.smartfancontrol status 2>&1
 echo
 
+echo "[Configured sensor drivers]"
+if [[ -f /boot/config/plugins/smartfancontrol/drivers.conf ]]; then
+  cat /boot/config/plugins/smartfancontrol/drivers.conf
+else
+  echo "No drivers.conf"
+fi
+echo
+
+echo "[Sensor driver module status]"
+if [[ -f /boot/config/plugins/smartfancontrol/drivers.conf ]]; then
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    module="${line%%#*}"
+    module="$(echo "$module" | xargs 2>/dev/null)"
+    [[ -n "$module" ]] || continue
+    if lsmod | awk '{print $1}' | grep -qx "$module"; then
+      echo "$module: loaded"
+    else
+      echo "$module: not loaded"
+    fi
+  done < /boot/config/plugins/smartfancontrol/drivers.conf
+fi
+echo
+
 echo "[NVIDIA]"
 if command -v nvidia-smi >/dev/null 2>&1; then
   nvidia-smi --query-gpu=index,uuid,name,temperature.gpu --format=csv,noheader,nounits 2>&1

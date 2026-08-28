@@ -1,12 +1,20 @@
 # Changelog
 
+## 0.1.5 (Beta)
+- Add persistent sensor-driver management at `/boot/config/plugins/smartfancontrol/drivers.conf`.
+- On first 0.1.5 install, automatically import the proven driver list from Dynamix System Temperature when available.
+- Load configured hwmon modules with `modprobe` whenever Smart Fan Control starts, including at Unraid boot.
+- Add `rc.smartfancontrol drivers` for manually reloading configured sensor modules.
+- Extend diagnostics to show configured sensor drivers and whether each module is currently loaded.
+- Keep driver modules loaded on plugin stop/remove to avoid disrupting other hwmon users.
+- Preserve all v0.1.4 online-update, native icon, Unraid 7.x CSRF, multi-PWM, NVIDIA/Tesla P4, curve and fail-safe behavior.
+
 ## 0.1.4 (Beta)
-- Fix the Plugins page icon on Unraid 7.x by using the native `icon-fan` glyph instead of unsupported `fa-fan`.
+- Fix the Plugins page icon by using Unraid's native `icon-fan` glyph instead of unavailable `fa-fan`.
 
 ## 0.1.3 (Beta)
-- Add a canonical GitHub `pluginURL` so Unraid can check for updates and no longer shows the plugin as unavailable after publication.
-- Add GitHub Issues support URL and a native Unraid fan icon in the Plugins page.
-- Set the GitHub repository owner as the plugin author for clearer ownership.
+- Add a canonical GitHub `pluginURL` so Unraid can check for updates.
+- Add GitHub Issues support URL and plugin ownership metadata.
 - Add a maintainable source tree and reproducible PLG build script.
 - Preserve all v0.1.2 runtime refresh, Unraid 7.x CSRF, multi-PWM, Tesla P4/NVIDIA sensor, curve and fail-safe behavior.
 

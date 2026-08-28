@@ -7,6 +7,27 @@ CONFIG="/boot/config/plugins/$NAME/config.json"
 RUN_DIR="/run/$NAME"
 PID_FILE="$RUN_DIR/$NAME.pid"
 LOG="/var/log/$NAME.log"
+DRIVERS="/boot/config/plugins/$NAME/drivers.conf"
+
+load_hwmon_drivers() {
+  [[ -f "$DRIVERS" ]] || return 0
+  local module line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # Strip comments and surrounding whitespace; drivers.conf intentionally
+    # stores module names only (one per line).
+    module="${line%%#*}"
+    module="$(echo "$module" | xargs 2>/dev/null)"
+    [[ -n "$module" ]] || continue
+    if modprobe "$module" >/dev/null 2>&1; then
+      :
+    else
+      echo "warning: failed to load hwmon module $module" >&2
+      logger -t smartfancontrol "Failed to load hwmon module: $module"
+    fi
+  done < "$DRIVERS"
+  # Give hwmon sysfs nodes a short moment to appear before the daemon scans.
+  sleep 0.2
+}
 
 is_running() {
   if [[ -f "$PID_FILE" ]]; then
@@ -21,6 +42,7 @@ is_running() {
 
 start_service() {
   mkdir -p "$RUN_DIR" /boot/config/plugins/$NAME
+  load_hwmon_drivers
   if is_running; then
     echo "$NAME already running"
     return 0
@@ -83,10 +105,11 @@ status_service() {
 
 case "${1:-status}" in
   start) start_service ;;
+  drivers) load_hwmon_drivers ;;
   stop) stop_service ;;
   restart) stop_service; start_service ;;
   status) status_service ;;
   restore) "$DAEMON" --restore ;;
-  *) echo "Usage: $0 {start|stop|restart|status|restore}"; exit 2 ;;
+  *) echo "Usage: $0 {start|stop|restart|status|restore|drivers}"; exit 2 ;;
 esac
 

@@ -14,6 +14,7 @@ Smart Fan Control is an Unraid plugin for controlling one or more Linux `hwmon` 
 - Restores the original `pwmX_enable` mode when the service stops
 - Unraid WebGUI integration under **Settings -> User Utilities**
 - Native Unraid plugin update checking through `pluginURL`
+- Persistent hwmon sensor-driver loading via `drivers.conf`
 
 ## Safety
 
@@ -39,6 +40,14 @@ Existing configuration is kept across upgrades in:
 /boot/config/plugins/smartfancontrol/config.json
 ```
 
+Sensor driver modules are stored separately in:
+
+```text
+/boot/config/plugins/smartfancontrol/drivers.conf
+```
+
+On the first upgrade to v0.1.5, Smart Fan Control imports the existing Dynamix System Temperature `drivers.conf` when present. This lets the plugin load modules such as `coretemp` and `nct6775` by itself on future Unraid boots.
+
 ## Recommended initial Tesla P4 curve
 
 | GPU temp | PWM |
@@ -55,6 +64,7 @@ Existing configuration is kept across upgrades in:
 
 ```bash
 /usr/local/emhttp/plugins/smartfancontrol/scripts/diagnose.sh
+/etc/rc.d/rc.smartfancontrol drivers
 cat /run/smartfancontrol/status.json
 tail -n 100 /var/log/smartfancontrol.log
 ```
