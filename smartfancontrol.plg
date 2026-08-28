@@ -12,7 +12,7 @@
 <![CDATA[
 # Changelog
 
-## 2026.08.29 (Beta)
+## 2026.08.29
 - Prepare the repository for Unraid Community Applications submission using the current official starter layout (`ca_profile.xml` plus `plugins/smartfancontrol.xml`).
 - Switch the public plugin version scheme from `0.1.x` to Unraid/LimeTech-style date versions (`YYYY.MM.DD`; use `a`, `b`, ... for additional releases on the same day).
 - Add a repository icon and Community Applications metadata while preserving all Smart Fan Control v0.1.8 runtime behavior and fixes.
@@ -285,7 +285,7 @@ init();
 <FILE Name="/usr/local/emhttp/plugins/smartfancontrol/api.php" Mode="0644">
 <INLINE><![CDATA[
 <?php
-/** Smart Fan Control 2026.08.29 API for Unraid webGui. */
+/** Smart Fan Control AJAX API for Unraid webGui. */
 declare(strict_types=1);
 
 header('Content-Type: application/json; charset=utf-8');
@@ -751,7 +751,7 @@ switch ($action) {
 #!/usr/bin/php
 <?php
 /**
- * Smart Fan Control 2026.08.29 for Unraid.
+ * Smart Fan Control daemon for Unraid.
  *
  * Controls multiple hwmon PWM channels from one or more temperature sensors.
  * Designed to survive hwmonX renumbering by resolving chip name + device path
@@ -1198,7 +1198,7 @@ function runDaemon(bool $once = false): int {
     ensureDir($p['run']);
     $runtime = [];
     @file_put_contents($p['pid'], (string)getmypid() . "\n");
-    logmsg('info', 'Smart Fan Control 2026.08.29 started');
+    logmsg('info', 'Smart Fan Control daemon started');
     $lastConfigHash = '';
     do {
         $config = readJsonFile($p['config'], defaultConfig());
@@ -1378,7 +1378,7 @@ esac
 #!/bin/bash
 set +e
 
-echo "=== Smart Fan Control 2026.08.29 ==="
+echo "=== Smart Fan Control diagnostics ==="
 date
 echo
 
@@ -1605,9 +1605,9 @@ chmod 0644 "$DRIVERS"
 logger -t smartfancontrol "Smart Fan Control 2026.08.29 installed"
 echo ""
 echo "-----------------------------------------------------------"
-echo " Smart Fan Control 2026.08.29 (Beta) installed"
+echo " Smart Fan Control 2026.08.29 installed"
 echo " Sensor driver config: $DRIVERS"
-echo " Open Settings -> User Utilities -> Smart Fan Control 2026.08.29 configure it."
+echo " Open Settings -> User Utilities -> Smart Fan Control to configure it."
 echo "-----------------------------------------------------------"
 echo ""
 ]]></INLINE>
@@ -1621,7 +1621,7 @@ rm -rf /usr/local/emhttp/plugins/smartfancontrol
 rm -f /etc/rc.d/rc.smartfancontrol
 rm -rf /run/smartfancontrol
 rm -rf /boot/config/plugins/smartfancontrol
-logger -t smartfancontrol "Smart Fan Control 2026.08.29"
+logger -t smartfancontrol "Smart Fan Control removed"
 ]]></INLINE>
 </FILE>
 </PLUGIN>

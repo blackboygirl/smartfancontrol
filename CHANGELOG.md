@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026.08.29 (Beta)
+## 2026.08.29
 - Prepare the repository for Unraid Community Applications submission using the current official starter layout (`ca_profile.xml` plus `plugins/smartfancontrol.xml`).
 - Switch the public plugin version scheme from `0.1.x` to Unraid/LimeTech-style date versions (`YYYY.MM.DD`; use `a`, `b`, ... for additional releases on the same day).
 - Add a repository icon and Community Applications metadata while preserving all Smart Fan Control v0.1.8 runtime behavior and fixes.

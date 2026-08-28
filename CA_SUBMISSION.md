@@ -37,9 +37,9 @@ https://raw.githubusercontent.com/blackboygirl/smartfancontrol/main/smartfancont
    https://github.com/blackboygirl/smartfancontrol
    ```
 
-## Beta status
+## Release status
 
-`plugins/smartfancontrol.xml` currently contains `<Beta>true</Beta>` because the plugin is still being validated across different hardware. When it is ready for a stable listing, change this to `false` and remove the `(Beta)` wording from the installer output/release notes if desired.
+`plugins/smartfancontrol.xml` contains `<Beta>false</Beta>`, so this submission is presented as a stable release in Community Applications. Future development builds can temporarily switch this to `true` when appropriate.
 
 ## Versioning
 

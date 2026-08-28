@@ -25,7 +25,7 @@ def normalized(path: Path) -> str:
     if ']]>' in s:
         raise SystemExit(f'CDATA terminator found in {path}')
     s = re.sub(r"const SFC_VERSION = '[^']+';", f"const SFC_VERSION = '{VERSION}';", s)
-    s = re.sub(r'Smart Fan Control [0-9A-Za-z._-]+', f'Smart Fan Control {VERSION}', s)
+    s = re.sub(r'Smart Fan Control (?:\d{4}\.\d{2}\.\d{2}[a-z]?|\d+\.\d+\.\d+)', f'Smart Fan Control {VERSION}', s)
     return s.rstrip('\n')
 
 def cdata(s: str) -> str:
