@@ -84,3 +84,8 @@ to regenerate `smartfancontrol.plg`. The build script reads the version from `VE
 ## License
 
 MIT
+
+
+### Driver detection behavior
+
+The driver detector runs `sensors-detect --auto` first. If lm-sensors returns no recommendations because the relevant drivers are already loaded, Smart Fan Control independently inspects currently loaded hwmon modules/sysfs and merges those results. This fallback does not depend on Dynamix System Temperature.

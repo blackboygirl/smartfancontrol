@@ -196,36 +196,78 @@ function driverInfo(?array $modules = null): array {
 function parseDetectedModules(string $text): array {
     $found = [];
 
-    // Standard lm-sensors output contains lines such as: Driver `coretemp':
-    if (preg_match_all('/^Driver\\s+[`\\\'"]*([a-zA-Z0-9_-]+)[`\\\'"]*\\s*:/mi', $text, $m)) {
-        foreach ($m[1] as $module) $found[] = $module;
+    // lm-sensors summary, e.g. Driver `coretemp':
+    if (preg_match_all('/^\s*Driver\s+[`\'\"]?([^`\'\"\s:]+)[`\'\"]?\s*:/mi', $text, $m)) {
+        foreach ($m[1] as $module) $found[] = trim((string)$module);
     }
 
-    // Also understand the shell snippet emitted near the end of sensors-detect.
+    // Dynamix System Temperature historically extracts the same summary with:
+    // grep -Po "^Driver.{2}\\K[^\\']*". Be deliberately tolerant of spacing/quotes.
+    if (preg_match_all('/^\s*Driver.{1,4}([a-zA-Z0-9_-]+)[`\'\"]?\s*:/mi', $text, $m2)) {
+        foreach ($m2[1] as $module) $found[] = trim((string)$module);
+    }
+
+    // Understand both modern module-list snippets and older rc.local snippets:
+    // # Chip drivers
+    // coretemp
+    // nct6775
+    // or: modprobe coretemp
     $inChipDrivers = false;
-    foreach (preg_split('/\\R/', $text) ?: [] as $line) {
+    foreach (preg_split('/\R/', $text) ?: [] as $line) {
         $trim = trim($line);
-        if (preg_match('/^#\\s*Chip drivers\\s*$/i', $trim)) {
+        if (preg_match('/^#\s*Chip drivers\s*$/i', $trim)) {
             $inChipDrivers = true;
             continue;
         }
         if (!$inChipDrivers) continue;
         if ($trim === '') continue;
-        if (str_starts_with($trim, '#')) {
-            if (preg_match('/^#-+/', $trim)) break;
+        if (preg_match('/^#-+/', $trim)) break;
+        if (str_starts_with($trim, '#')) continue;
+        if (preg_match('/^(?:\/sbin\/|\/usr\/sbin\/)?modprobe\s+([a-zA-Z0-9_-]+)/i', $trim, $mm)) {
+            $found[] = $mm[1];
             continue;
         }
-        foreach (preg_split('/\\s+/', $trim) ?: [] as $token) {
-            if (preg_match('/^[a-zA-Z0-9_-]+$/', $token)) $found[] = $token;
+        if (preg_match('/^([a-zA-Z0-9_-]+)$/', $trim, $mm)) {
+            $found[] = $mm[1];
         }
     }
 
     $valid = [];
     foreach (sanitizeModules($found) as $module) {
+        if ($module === 'to-be-written' || $module === 'use-isa-instead') continue;
         if (moduleAvailable($module)) $valid[] = $module;
     }
     sort($valid, SORT_STRING);
     return array_values(array_unique($valid));
+}
+
+function loadedHwmonDriverFallback(): array {
+    // sensors-detect can legitimately return no recommendations when the relevant
+    // drivers are already bound. In that case preserve known hwmon modules that
+    // are demonstrably loaded. This does not depend on Dynamix configuration.
+    $known = [
+        'coretemp','nct6775','k10temp','zenpower','it87','drivetemp','jc42',
+        'asus_wmi_sensors','asus_ec_sensors','gigabyte_wmi','dell_smm_hwmon',
+        'sch56xx_common','sch5627','sch5636','w83627ehf','f71882fg'
+    ];
+    $found = [];
+    foreach ($known as $module) {
+        if (moduleLoaded($module) && moduleAvailable($module)) $found[] = $module;
+    }
+
+    // Also resolve the actual backing module of hwmon devices where sysfs exposes it,
+    // but only accept safe module-name syntax and a module that modprobe can resolve.
+    foreach (glob('/sys/class/hwmon/hwmon*') ?: [] as $hw) {
+        $link = @realpath($hw . '/device/driver/module');
+        if ($link === false || $link === '') continue;
+        $module = basename($link);
+        if (!preg_match('/^[a-zA-Z0-9_-]+$/', $module)) continue;
+        if (moduleAvailable($module)) $found[] = $module;
+    }
+
+    $found = sanitizeModules($found);
+    sort($found, SORT_STRING);
+    return array_values(array_unique($found));
 }
 
 function detectDrivers(): array {
@@ -243,15 +285,29 @@ function detectDrivers(): array {
     $cmd = ($timeout !== '' ? escapeshellarg($timeout) . ' 90 ' : '')
         . escapeshellarg($detector) . ' --auto 2>&1';
     @exec($cmd, $out, $rc);
-    $text = implode("\\n", $out);
-    $modules = parseDetectedModules($text);
+    $text = implode("\n", $out);
+    $sensorModules = parseDetectedModules($text);
+    $loadedModules = loadedHwmonDriverFallback();
+    $modules = sanitizeModules(array_merge($sensorModules, $loadedModules));
+    $modules = array_values(array_filter($modules, fn($m) => moduleAvailable($m)));
+    sort($modules, SORT_STRING);
+    $modules = array_values(array_unique($modules));
+
     if (!$modules) {
-        $tail = trim(implode("\\n", array_slice($out, -12)));
+        $tail = trim(implode("\n", array_slice($out, -20)));
         $error = '自动检测完成，但没有找到可加载的 hwmon 驱动。';
         if ($rc !== 0) $error .= ' sensors-detect 返回代码 ' . $rc . '。';
         return ['ok' => false, 'error' => $error, 'rc' => $rc, 'output_tail' => $tail];
     }
-    return ['ok' => true, 'modules' => $modules, 'rc' => $rc, 'output_tail' => trim(implode("\\n", array_slice($out, -12)))];
+
+    return [
+        'ok' => true,
+        'modules' => $modules,
+        'sensors_detect_modules' => $sensorModules,
+        'loaded_hwmon_modules' => $loadedModules,
+        'rc' => $rc,
+        'output_tail' => trim(implode("\n", array_slice($out, -20))),
+    ];
 }
 
 function writeDrivers(array $modules): bool {

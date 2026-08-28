@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.7 (Beta)
+- Fix automatic driver detection when `sensors-detect --auto` returns no recommendations because hwmon drivers are already loaded/bound.
+- Make lm-sensors output parsing more tolerant across old/new `sensors-detect` formats, including both plain module lists and `modprobe` snippets.
+- Add an independent fallback that resolves currently loaded hwmon backing modules from sysfs and known hwmon modules; it does not read Dynamix configuration.
+- Show whether detection came from `sensors-detect`, currently loaded hwmon modules, or both.
+
 ## 0.1.6 (Beta)
 - Add independent sensor-driver auto-detection using the local `sensors-detect --auto` workflow used by lm-sensors/Dynamix System Temperature.
 - Add a WebGUI **Sensor Drivers** panel with auto-detect, editable module list, save/load, and loaded/available status.

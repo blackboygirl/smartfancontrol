@@ -131,7 +131,7 @@ function renderDriverInfo(info,writeEditor=false){
   const detect=$('#sfc-driver-detect');if(detect)detect.disabled=!driverInfo.detect_available;
 }
 async function refreshDrivers(writeEditor=true){try{const d=await post('driver_info');renderDriverInfo(d.drivers||{},writeEditor);}catch(e){msg('读取驱动状态失败：'+e.message,false)}}
-async function detectDrivers(){const btn=$('#sfc-driver-detect');try{btn.disabled=true;btn.value='正在检测…';const d=await post('driver_detect');const mods=(d.detected?.modules||[]);$('#sfc-drivers').value=mods.join('\n');renderDriverInfo(d.drivers||{},false);msg('检测完成：'+mods.join(', ')+'。确认后点击“保存并加载驱动”。');}catch(e){msg('驱动检测失败：'+e.message,false)}finally{btn.value='自动检测驱动';btn.disabled=!driverInfo.detect_available}}
+async function detectDrivers(){const btn=$('#sfc-driver-detect');try{btn.disabled=true;btn.value='正在检测…';const d=await post('driver_detect');const mods=(d.detected?.modules||[]),sd=(d.detected?.sensors_detect_modules||[]),fb=(d.detected?.loaded_hwmon_modules||[]);$('#sfc-drivers').value=mods.join('\n');renderDriverInfo(d.drivers||{},false);let via=sd.length?'sensors-detect':'';if(fb.length)via+=(via?' + ':'')+'当前已加载 hwmon';msg('检测完成：'+mods.join(', ')+(via?'（'+via+'）':'')+'。确认后点击“保存并加载驱动”。');}catch(e){msg('驱动检测失败：'+e.message,false)}finally{btn.value='自动检测驱动';btn.disabled=!driverInfo.detect_available}}
 async function saveDrivers(){try{const text=$('#sfc-drivers').value;const d=await post('driver_save',{modules:text});driverInfo=d.drivers||driverInfo;if(d.hardware)hw=d.hardware;renderDriverInfo(driverInfo,true);render();msg('驱动已保存并加载，硬件已重新扫描。');}catch(e){msg('保存驱动失败：'+e.message,false)}}
 function profileStatus(id){return (lastStatus.profiles||{})[id]||{};}
 function render(){
