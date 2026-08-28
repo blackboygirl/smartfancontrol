@@ -1,0 +1,14 @@
+<Plugin>
+  <Name>Smart Fan Control</Name>
+  <Overview>Advanced PWM fan control for Unraid with multiple independent controllers, NVIDIA GPU and Linux hwmon temperature sources, automatic sensor-driver discovery, RPM monitoring, configurable fan curves, and fail-safe protection.</Overview>
+  <PluginURL>https://raw.githubusercontent.com/blackboygirl/smartfancontrol/main/smartfancontrol.plg</PluginURL>
+  <PluginAuthor>blackboygirl</PluginAuthor>
+  <Support>https://github.com/blackboygirl/smartfancontrol/issues</Support>
+  <Project>https://github.com/blackboygirl/smartfancontrol</Project>
+  <ReadMe>https://raw.githubusercontent.com/blackboygirl/smartfancontrol/main/README.md</ReadMe>
+  <Category>Tools:System</Category>
+  <Beta>true</Beta>
+  <MinVer>6.12.0</MinVer>
+  <Icon>https://raw.githubusercontent.com/blackboygirl/smartfancontrol/main/icon.svg</Icon>
+  <License>MIT</License>
+</Plugin>

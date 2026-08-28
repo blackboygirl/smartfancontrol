@@ -2,7 +2,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name "smartfancontrol">
 <!ENTITY author "blackboygirl">
-<!ENTITY version "0.1.8">
+<!ENTITY version "2026.08.29">
 <!ENTITY launch "Settings/SmartFanControl">
 <!ENTITY github "blackboygirl/smartfancontrol">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/blackboygirl/smartfancontrol/main/smartfancontrol.plg">
@@ -11,6 +11,12 @@
 <CHANGES>
 <![CDATA[
 # Changelog
+
+## 2026.08.29 (Beta)
+- Prepare the repository for Unraid Community Applications submission using the current official starter layout (`ca_profile.xml` plus `plugins/smartfancontrol.xml`).
+- Switch the public plugin version scheme from `0.1.x` to Unraid/LimeTech-style date versions (`YYYY.MM.DD`; use `a`, `b`, ... for additional releases on the same day).
+- Add a repository icon and Community Applications metadata while preserving all Smart Fan Control v0.1.8 runtime behavior and fixes.
+- Keep the canonical `pluginURL` unchanged so existing v0.1.8 installations can discover this release as an online update.
 
 ## 0.1.8 (Beta)
 - Fix `drivers.conf` persistence: write real newline-separated module names instead of literal `\n` sequences.
@@ -279,13 +285,13 @@ init();
 <FILE Name="/usr/local/emhttp/plugins/smartfancontrol/api.php" Mode="0644">
 <INLINE><![CDATA[
 <?php
-/** Smart Fan Control AJAX API for Unraid webGui. */
+/** Smart Fan Control 2026.08.29 API for Unraid webGui. */
 declare(strict_types=1);
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-const SFC_VERSION = '0.1.8';
+const SFC_VERSION = '2026.08.29';
 const SFC_CONFIG = '/boot/config/plugins/smartfancontrol/config.json';
 const SFC_RUN = '/run/smartfancontrol';
 const SFC_STATUS = SFC_RUN . '/status.json';
@@ -745,7 +751,7 @@ switch ($action) {
 #!/usr/bin/php
 <?php
 /**
- * Smart Fan Control daemon for Unraid.
+ * Smart Fan Control 2026.08.29 for Unraid.
  *
  * Controls multiple hwmon PWM channels from one or more temperature sensors.
  * Designed to survive hwmonX renumbering by resolving chip name + device path
@@ -754,7 +760,7 @@ switch ($action) {
 
 declare(strict_types=1);
 
-const SFC_VERSION = '0.1.8';
+const SFC_VERSION = '2026.08.29';
 
 function envp(string $name, string $default): string {
     $v = getenv($name);
@@ -1192,7 +1198,7 @@ function runDaemon(bool $once = false): int {
     ensureDir($p['run']);
     $runtime = [];
     @file_put_contents($p['pid'], (string)getmypid() . "\n");
-    logmsg('info', 'Smart Fan Control daemon started');
+    logmsg('info', 'Smart Fan Control 2026.08.29 started');
     $lastConfigHash = '';
     do {
         $config = readJsonFile($p['config'], defaultConfig());
@@ -1372,7 +1378,7 @@ esac
 #!/bin/bash
 set +e
 
-echo "=== Smart Fan Control diagnostics ==="
+echo "=== Smart Fan Control 2026.08.29 ==="
 date
 echo
 
@@ -1596,12 +1602,12 @@ fi
 chmod 0644 "$DRIVERS"
 
 /etc/rc.d/rc.smartfancontrol start >/dev/null 2>&1 || true
-logger -t smartfancontrol "Smart Fan Control 0.1.8 installed"
+logger -t smartfancontrol "Smart Fan Control 2026.08.29 installed"
 echo ""
 echo "-----------------------------------------------------------"
-echo " Smart Fan Control 0.1.8 (Beta) installed"
+echo " Smart Fan Control 2026.08.29 (Beta) installed"
 echo " Sensor driver config: $DRIVERS"
-echo " Open Settings -> User Utilities -> Smart Fan Control to configure it."
+echo " Open Settings -> User Utilities -> Smart Fan Control 2026.08.29 configure it."
 echo "-----------------------------------------------------------"
 echo ""
 ]]></INLINE>
@@ -1615,7 +1621,7 @@ rm -rf /usr/local/emhttp/plugins/smartfancontrol
 rm -f /etc/rc.d/rc.smartfancontrol
 rm -rf /run/smartfancontrol
 rm -rf /boot/config/plugins/smartfancontrol
-logger -t smartfancontrol "Smart Fan Control removed"
+logger -t smartfancontrol "Smart Fan Control 2026.08.29"
 ]]></INLINE>
 </FILE>
 </PLUGIN>

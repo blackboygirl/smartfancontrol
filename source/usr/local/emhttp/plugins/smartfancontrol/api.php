@@ -5,7 +5,7 @@ declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-const SFC_VERSION = '0.1.6';
+const SFC_VERSION = '2026.08.29';
 const SFC_CONFIG = '/boot/config/plugins/smartfancontrol/config.json';
 const SFC_RUN = '/run/smartfancontrol';
 const SFC_STATUS = SFC_RUN . '/status.json';

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.08.29 (Beta)
+- Prepare the repository for Unraid Community Applications submission using the current official starter layout (`ca_profile.xml` plus `plugins/smartfancontrol.xml`).
+- Switch the public plugin version scheme from `0.1.x` to Unraid/LimeTech-style date versions (`YYYY.MM.DD`; use `a`, `b`, ... for additional releases on the same day).
+- Add a repository icon and Community Applications metadata while preserving all Smart Fan Control v0.1.8 runtime behavior and fixes.
+- Keep the canonical `pluginURL` unchanged so existing v0.1.8 installations can discover this release as an online update.
+
 ## 0.1.8 (Beta)
 - Fix `drivers.conf` persistence: write real newline-separated module names instead of literal `\n` sequences.
 - Make sensor-driver loading return a failure when any configured `modprobe` fails, so the WebGUI no longer reports a false successful save/load.

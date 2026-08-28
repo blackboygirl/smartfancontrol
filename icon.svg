@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Smart Fan Control</title>
+  <desc id="desc">A four blade fan icon</desc>
+  <rect width="512" height="512" rx="96" fill="#1f1f1f"/>
+  <g fill="#f2f2f2">
+    <ellipse cx="256" cy="148" rx="54" ry="96"/>
+    <ellipse cx="256" cy="148" rx="54" ry="96" transform="rotate(90 256 256)"/>
+    <ellipse cx="256" cy="148" rx="54" ry="96" transform="rotate(180 256 256)"/>
+    <ellipse cx="256" cy="148" rx="54" ry="96" transform="rotate(270 256 256)"/>
+  </g>
+  <circle cx="256" cy="256" r="58" fill="#ff7a00"/>
+  <circle cx="256" cy="256" r="23" fill="#1f1f1f"/>
+</svg>

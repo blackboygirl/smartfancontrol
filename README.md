@@ -28,7 +28,13 @@ This plugin writes directly to Linux hwmon PWM controls. Prefer BIOS control for
 
 ## Install
 
-After this repository is public, install from **Plugins -> Install Plugin** with:
+### Community Applications
+
+After the repository is accepted into Unraid Community Applications, open **Apps**, search for **Smart Fan Control**, and select **Install**.
+
+### Manual plugin install
+
+Install from **Plugins -> Install Plugin** with:
 
 ```text
 https://raw.githubusercontent.com/blackboygirl/smartfancontrol/main/smartfancontrol.plg
@@ -65,6 +71,10 @@ On upgrades, Smart Fan Control can import an existing Dynamix System Temperature
 | 65°C | 70% |
 | 70°C | 80% |
 | 75°C | 100% |
+
+## Versioning
+
+Public releases use the Unraid/LimeTech-style `YYYY.MM.DD` version format. If multiple releases are published on the same day, append a letter such as `2026.08.29a`. The previous development line ended at `0.1.8`; `2026.08.29` is the first Community Applications submission candidate.
 
 ## Diagnostics
 

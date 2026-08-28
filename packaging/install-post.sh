@@ -33,10 +33,10 @@ fi
 chmod 0644 "$DRIVERS"
 
 /etc/rc.d/rc.smartfancontrol start >/dev/null 2>&1 || true
-logger -t smartfancontrol "Smart Fan Control 0.1.5 installed"
+logger -t smartfancontrol "Smart Fan Control 2026.08.29 installed"
 echo ""
 echo "-----------------------------------------------------------"
-echo " Smart Fan Control 0.1.5 (Beta) installed"
+echo " Smart Fan Control 2026.08.29 (Beta) installed"
 echo " Sensor driver config: $DRIVERS"
 echo " Open Settings -> User Utilities -> Smart Fan Control to configure it."
 echo "-----------------------------------------------------------"

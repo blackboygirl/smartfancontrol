@@ -25,7 +25,7 @@ def normalized(path: Path) -> str:
     if ']]>' in s:
         raise SystemExit(f'CDATA terminator found in {path}')
     s = re.sub(r"const SFC_VERSION = '[^']+';", f"const SFC_VERSION = '{VERSION}';", s)
-    s = re.sub(r'Smart Fan Control 0\.1\.\d+', f'Smart Fan Control {VERSION}', s)
+    s = re.sub(r'Smart Fan Control [0-9A-Za-z._-]+', f'Smart Fan Control {VERSION}', s)
     return s.rstrip('\n')
 
 def cdata(s: str) -> str:
@@ -76,4 +76,8 @@ parts.extend([
 
 out = ROOT / f'{NAME}.plg'
 out.write_text('\n'.join(parts) + '\n')
+
+import hashlib
+digest = hashlib.sha256(out.read_bytes()).hexdigest()
+(ROOT / 'SHA256SUMS').write_text(f'{digest}  {out.name}\n')
 print(out)
