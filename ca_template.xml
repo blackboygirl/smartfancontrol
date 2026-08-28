@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Containers>
+  <Plugin>True</Plugin>
+  <PluginURL>https://raw.githubusercontent.com/blackboygirl/smartfancontrol/main/smartfancontrol.plg</PluginURL>
+  <PluginAuthor>blackboygirl</PluginAuthor>
+  <Beta>True</Beta>
+  <Category>Tools:System</Category>
+  <Date>2026-08-29</Date>
+  <Name>Smart Fan Control</Name>
+  <Description>Multi-PWM Unraid fan control using NVIDIA GPU, hwmon and array temperature sources with curves and fail-safes.</Description>
+  <MinVer>6.12.0</MinVer>
+  <Project>https://github.com/blackboygirl/smartfancontrol</Project>
+  <Support>https://github.com/blackboygirl/smartfancontrol/issues</Support>
+  <License>MIT</License>
+</Containers>

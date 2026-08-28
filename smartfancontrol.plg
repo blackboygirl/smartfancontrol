@@ -1,0 +1,1238 @@
+<?xml version='1.0' standalone='yes'?>
+<!DOCTYPE PLUGIN [
+<!ENTITY name "smartfancontrol">
+<!ENTITY author "blackboygirl">
+<!ENTITY version "0.1.3">
+<!ENTITY launch "Settings/SmartFanControl">
+<!ENTITY github "blackboygirl/smartfancontrol">
+<!ENTITY pluginURL "https://raw.githubusercontent.com/blackboygirl/smartfancontrol/main/smartfancontrol.plg">
+]>
+<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" min="6.12.0" support="https://github.com/blackboygirl/smartfancontrol/issues" icon="fan">
+<CHANGES>
+<![CDATA[
+# Changelog
+
+## 0.1.3 (Beta)
+- Add a canonical GitHub `pluginURL` so Unraid can check for updates and no longer shows the plugin as unavailable after publication.
+- Add GitHub Issues support URL and a native Unraid fan icon in the Plugins page.
+- Set the GitHub repository owner as the plugin author for clearer ownership.
+- Add a maintainable source tree and reproducible PLG build script.
+- Preserve all v0.1.2 runtime refresh, Unraid 7.x CSRF, multi-PWM, Tesla P4/NVIDIA sensor, curve and fail-safe behavior.
+
+## 0.1.2 (Beta)
+- Move settings entry to Settings -> User Utilities.
+- Force-clean runtime plugin files during upgrade/reinstall while preserving config.
+- Keep the Unraid 7.x CSRF fix and align runtime/package version markers.
+
+## 0.1.1 (Beta)
+- Fix Unraid 7.x AJAX CSRF handling by relying on webGui gateway validation.
+
+## 0.1.0 (Beta)
+- Multi-PWM independent fan controllers.
+- NVIDIA GPU, hwmon and array-max temperature sources.
+- Multiple sensors per controller, multi-point curves and fail-safes.
+]]>
+</CHANGES>
+<FILE Run="/bin/bash">
+<INLINE><![CDATA[
+#!/bin/bash
+set -u
+/etc/rc.d/rc.smartfancontrol stop >/dev/null 2>&1 || true
+# Force a clean runtime refresh on upgrade/reinstall. Persistent config on /boot is preserved.
+rm -rf /usr/local/emhttp/plugins/smartfancontrol
+rm -f /etc/rc.d/rc.smartfancontrol
+rm -rf /run/smartfancontrol
+mkdir -p /boot/config/plugins/smartfancontrol
+]]></INLINE>
+</FILE>
+<FILE Name="/usr/local/emhttp/plugins/smartfancontrol/SmartFanControl.page" Mode="0644">
+<INLINE><![CDATA[
+Menu="Utilities"
+Title="Smart Fan Control"
+Icon="icon-fan"
+---
+<?php
+$docroot = $_SERVER['DOCUMENT_ROOT'] ?: '/usr/local/emhttp';
+$csrf = (isset($var) && is_array($var)) ? (string)($var['csrf_token'] ?? '') : '';
+if ($csrf === '') {
+    $sfcVar = @parse_ini_file($docroot . '/state/var.ini');
+    if (!is_array($sfcVar)) $sfcVar = @parse_ini_file('/var/local/emhttp/var.ini');
+    $csrf = is_array($sfcVar) ? (string)($sfcVar['csrf_token'] ?? '') : '';
+}
+?>
+<style>
+#sfc-root{max-width:1180px;margin:12px auto 40px;padding:0 12px;box-sizing:border-box}
+#sfc-root *{box-sizing:border-box}
+.sfc-toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:12px 0 18px}
+.sfc-toolbar .grow{flex:1 1 auto}
+.sfc-status{display:inline-flex;align-items:center;gap:7px;font-weight:600}
+.sfc-dot{width:10px;height:10px;border-radius:50%;display:inline-block;background:#999}
+.sfc-dot.run{background:#43a047}.sfc-dot.stop{background:#d84315}
+.sfc-card{border:1px solid #c8c8c8;border-radius:5px;padding:16px;margin:0 0 16px;background:rgba(255,255,255,.03)}
+.sfc-card-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.sfc-card-head input[type=text]{font-size:1.05rem;font-weight:600;min-width:220px;flex:1 1 260px}
+.sfc-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 20px}
+.sfc-field label{display:block;font-weight:600;margin:0 0 4px}.sfc-field small{display:block;color:#777;margin-top:4px}
+.sfc-field input[type=text],.sfc-field input[type=number],.sfc-field select{width:100%;min-height:34px}
+.sfc-sensors{border:1px solid #ccc;border-radius:4px;max-height:210px;overflow:auto;padding:6px 10px}
+.sfc-sensor-row{display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px dotted #ddd}.sfc-sensor-row:last-child{border-bottom:0}
+.sfc-sensor-row span{flex:1}.sfc-sensor-temp{font-family:monospace;color:#666;white-space:nowrap}
+.sfc-curve{width:100%;border-collapse:collapse}.sfc-curve th,.sfc-curve td{text-align:left;padding:5px 6px;border-bottom:1px solid #ddd}.sfc-curve input{width:100%;min-width:80px}
+.sfc-curve-actions{margin-top:7px}.sfc-mini-btn{padding:4px 9px!important;min-height:28px!important}
+.sfc-live{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:10px 0 14px}
+.sfc-live>div{border:1px solid #ddd;border-radius:4px;padding:8px;text-align:center}.sfc-live b{display:block;font-size:1.15rem;margin-top:3px}
+.sfc-message{padding:10px 12px;border-radius:4px;margin:10px 0;display:none}.sfc-message.ok{display:block;background:rgba(67,160,71,.14);border:1px solid #43a047}.sfc-message.err{display:block;background:rgba(216,67,21,.12);border:1px solid #d84315}
+.sfc-warning{border-left:4px solid #f0a000;padding:8px 12px;margin:12px 0;background:rgba(240,160,0,.08)}
+.sfc-empty{padding:28px;text-align:center;color:#777;border:1px dashed #bbb;border-radius:5px}
+.sfc-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sfc-danger{color:#b71c1c}
+@media(max-width:760px){.sfc-grid{grid-template-columns:1fr}.sfc-live{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+
+<div id="sfc-root">
+  <div class="sfc-warning">
+    <b>安全提示：</b>此插件会直接写入 Linux hwmon PWM 控制接口。建议 CPU 风扇继续交给 BIOS；GPU/机箱风扇首次启用时请现场观察转速和温度。温度源失联、达到临界温度或检测到停转时会按 Fail-safe 设置提升风扇转速。
+  </div>
+
+  <div class="sfc-toolbar">
+    <label><input type="checkbox" id="sfc-global-enabled"> <b>启用 Smart Fan Control</b></label>
+    <label>刷新间隔 <input type="number" id="sfc-interval" min="2" max="60" value="5" style="width:68px"> 秒</label>
+    <span class="grow"></span>
+    <span class="sfc-status"><span id="sfc-dot" class="sfc-dot stop"></span><span id="sfc-service-text">正在读取状态…</span></span>
+  </div>
+
+  <div class="sfc-toolbar">
+    <input type="button" id="sfc-scan" value="重新扫描硬件">
+    <input type="button" id="sfc-add" value="+ 添加控制器">
+    <span class="grow"></span>
+    <input type="button" id="sfc-save" value="应用并保存">
+  </div>
+
+  <div id="sfc-message" class="sfc-message"></div>
+  <div id="sfc-cards"></div>
+</div>
+
+<script>
+(function(){
+'use strict';
+const root=document.getElementById('sfc-root');
+if(root.dataset.init==='1') return; root.dataset.init='1';
+const csrf=<?=json_encode((string)$csrf)?>;
+const api='/plugins/smartfancontrol/api.php';
+let hw={pwms:[],fans:[],temps:[],gpus:[]};
+let cfg={version:1,enabled:false,interval:5,profiles:[]};
+let lastStatus={};
+let pollTimer=null;
+
+const $=s=>root.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=> 'fan_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7);
+function msg(text,ok=true){const el=$('#sfc-message');el.className='sfc-message '+(ok?'ok':'err');el.textContent=text;clearTimeout(el._t);el._t=setTimeout(()=>{el.className='sfc-message';},6000)}
+function post(action,extra={}){const fd=new URLSearchParams();fd.set('action',action);fd.set('csrf_token',csrf);Object.entries(extra).forEach(([k,v])=>fd.set(k,v));return fetch(api,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:fd.toString(),cache:'no-store'}).then(async r=>{const d=await r.json().catch(()=>({ok:false,error:'Invalid API response'}));if(!r.ok||d.ok===false)throw new Error(d.error||('HTTP '+r.status));return d;});}
+function selectorId(o,kind){if(!o)return'';return 'hwmon|'+(o.chip||'')+'|'+(o.device||'')+'|'+(o.channel||'');}
+function sensorId(s){if(!s)return'';if(s.type==='nvidia')return'nvidia|'+s.uuid;if(s.type==='array_max')return'array|max';if(s.type==='hwmon')return'hwtemp|'+(s.chip||'')+'|'+(s.device||'')+'|'+(s.input||'');return'';}
+function allSensors(){return [...(hw.gpus||[]),...(hw.temps||[])];}
+function findPwm(id){return (hw.pwms||[]).find(x=>x.id===id)}
+function findFan(id){return (hw.fans||[]).find(x=>x.id===id)}
+function findSensor(id){return allSensors().find(x=>x.id===id)}
+function defaultProfile(){return {id:uid(),name:'新风扇控制器',enabled:true,pwm:null,rpm:null,sensor_mode:'max',sensors:[],curve:[{temp:45,pwm:40},{temp:55,pwm:50},{temp:65,pwm:70},{temp:75,pwm:100}],critical_temp:80,failsafe_pwm:100,min_pwm:30,min_rpm:0,rpm_guard_pwm:35};}
+function optionHtml(items,selected,placeholder){let out='<option value="">'+esc(placeholder)+'</option>';items.forEach(x=>{out+='<option value="'+esc(x.id)+'" '+(x.id===selected?'selected':'')+'>'+esc(x.label)+(x.rpm!=null?' — '+x.rpm+' RPM':'')+'</option>'});if(selected&&!items.some(x=>x.id===selected))out+='<option selected value="'+esc(selected)+'">已保存（当前未检测到）</option>';return out;}
+function sensorRows(profile){const selected=new Set((profile.sensors||[]).map(sensorId));const catalog=allSensors().slice();(profile.sensors||[]).forEach(s=>{const id=sensorId(s);if(id&&!catalog.some(x=>x.id===id))catalog.push({...s,id,label:(s.label||id)+'（当前不可用）',temp:null});});if(!catalog.length)return'<div style="padding:8px;color:#777">未检测到可用温度传感器</div>';return catalog.map(s=>'<label class="sfc-sensor-row"><input type="checkbox" class="sensor-check" value="'+esc(s.id)+'" '+(selected.has(s.id)?'checked':'')+'><span>'+esc(s.label)+'</span><span class="sfc-sensor-temp">'+(s.temp==null?'--':esc(s.temp)+' °C')+'</span></label>').join('');}
+function curveRows(curve){return (curve||[]).map((pt,i)=>'<tr><td><input class="curve-temp" type="number" step="1" value="'+esc(pt.temp)+'"></td><td><input class="curve-pwm" type="number" min="0" max="100" step="1" value="'+esc(pt.pwm)+'"></td><td><button type="button" class="sfc-mini-btn curve-del" data-i="'+i+'">删除</button></td></tr>').join('');}
+function profileStatus(id){return (lastStatus.profiles||{})[id]||{};}
+function render(){
+  $('#sfc-global-enabled').checked=!!cfg.enabled;$('#sfc-interval').value=cfg.interval||5;
+  const cards=$('#sfc-cards');
+  if(!cfg.profiles.length){cards.innerHTML='<div class="sfc-empty">还没有控制器。点击“+ 添加控制器”，例如创建 <b>Tesla P4 → nct6793 pwm5</b>。</div>';return;}
+  cards.innerHTML=cfg.profiles.map((p,idx)=>{const st=profileStatus(p.id);const pwmSel=selectorId(p.pwm,'pwm'),rpmSel=selectorId(p.rpm,'fan');return `
+  <section class="sfc-card" data-id="${esc(p.id)}">
+    <div class="sfc-card-head">
+      <label><input type="checkbox" class="profile-enabled" ${p.enabled?'checked':''}> 启用</label>
+      <input type="text" class="profile-name" value="${esc(p.name)}" aria-label="控制器名称">
+      <button type="button" class="profile-remove sfc-danger">删除控制器</button>
+    </div>
+    <div class="sfc-live">
+      <div>温度<b class="live-temp">${st.temperature==null?'--':esc(st.temperature)+' °C'}</b></div>
+      <div>PWM<b class="live-pwm">${st.applied_pwm==null?'--':esc(st.applied_pwm)+'%'}</b></div>
+      <div>转速<b class="live-rpm">${st.rpm==null?'--':esc(st.rpm)+' RPM'}</b></div>
+      <div>状态<b class="live-state">${esc(st.reason||st.state||'--')}</b></div>
+    </div>
+    <div class="sfc-grid">
+      <div class="sfc-field"><label>PWM 控制器</label><select class="pwm-select">${optionHtml(hw.pwms||[],pwmSel,'请选择 PWM')}</select><small>保存芯片名+设备路径+通道，不依赖 hwmonX 编号。</small></div>
+      <div class="sfc-field"><label>RPM 传感器</label><select class="rpm-select">${optionHtml(hw.fans||[],rpmSel,'可不选择')}</select><small>用于转速显示和停转保护。</small></div>
+      <div class="sfc-field" style="grid-column:1/-1"><label>温度传感器（可多选）</label><div class="sfc-sensors">${sensorRows(p)}</div></div>
+      <div class="sfc-field"><label>多传感器计算</label><select class="sensor-mode"><option value="max" ${p.sensor_mode!=='avg'?'selected':''}>取最高温度</option><option value="avg" ${p.sensor_mode==='avg'?'selected':''}>取平均温度</option></select></div>
+      <div class="sfc-field"><label>最低 PWM (%)</label><input class="min-pwm" type="number" min="0" max="100" value="${esc(p.min_pwm??30)}"><small>曲线要求非零转速时不会低于此值。</small></div>
+      <div class="sfc-field" style="grid-column:1/-1"><label>风扇曲线</label><table class="sfc-curve"><thead><tr><th>温度 °C</th><th>PWM %</th><th></th></tr></thead><tbody>${curveRows(p.curve)}</tbody></table><div class="sfc-curve-actions"><button type="button" class="curve-add sfc-mini-btn">+ 曲线节点</button></div></div>
+      <div class="sfc-field"><label>临界温度 °C</label><input class="critical-temp" type="number" min="20" max="150" value="${esc(p.critical_temp??80)}"><small>达到后强制 100% PWM。</small></div>
+      <div class="sfc-field"><label>传感器失联 Fail-safe (%)</label><input class="failsafe-pwm" type="number" min="20" max="100" value="${esc(p.failsafe_pwm??100)}"><small>建议保持 100%。</small></div>
+      <div class="sfc-field"><label>最低安全 RPM</label><input class="min-rpm" type="number" min="0" max="30000" value="${esc(p.min_rpm??0)}"><small>0=关闭停转保护；建议确认风扇最低稳定转速后填写。</small></div>
+      <div class="sfc-field"><label>RPM 检测起始 PWM (%)</label><input class="rpm-guard-pwm" type="number" min="0" max="100" value="${esc(p.rpm_guard_pwm??35)}"><small>高于此 PWM 且连续 3 次低于最低 RPM，会强制 100%。</small></div>
+    </div>
+  </section>`}).join('');
+  bindCards();
+}
+function bindCards(){root.querySelectorAll('.sfc-card').forEach(card=>{
+  card.querySelector('.profile-remove').addEventListener('click',()=>{const id=card.dataset.id;if(confirm('删除这个控制器？删除并保存后会恢复该 PWM 原来的控制模式。')){syncFromDom();cfg.profiles=cfg.profiles.filter(x=>x.id!==id);render();}});
+  card.querySelector('.curve-add').addEventListener('click',()=>{syncFromDom();const p=cfg.profiles.find(x=>x.id===card.dataset.id);p.curve.push({temp:(p.curve.at(-1)?.temp??60)+5,pwm:Math.min(100,(p.curve.at(-1)?.pwm??70)+10)});render();});
+  card.querySelectorAll('.curve-del').forEach(btn=>btn.addEventListener('click',()=>{syncFromDom();const p=cfg.profiles.find(x=>x.id===card.dataset.id);if(p.curve.length<=2){msg('至少保留 2 个曲线节点。',false);return;}p.curve.splice(Number(btn.dataset.i),1);render();}));
+ });}
+function syncFromDom(){
+  cfg.enabled=$('#sfc-global-enabled').checked;cfg.interval=Math.max(2,Math.min(60,Number($('#sfc-interval').value)||5));
+  root.querySelectorAll('.sfc-card').forEach(card=>{const p=cfg.profiles.find(x=>x.id===card.dataset.id);if(!p)return;p.enabled=card.querySelector('.profile-enabled').checked;p.name=card.querySelector('.profile-name').value.trim()||'Fan';
+    const pwm=findPwm(card.querySelector('.pwm-select').value);if(pwm)p.pwm={chip:pwm.chip,device:pwm.device,channel:pwm.channel};
+    const rpm=findFan(card.querySelector('.rpm-select').value);p.rpm=rpm?{chip:rpm.chip,device:rpm.device,channel:rpm.channel}:null;
+    p.sensor_mode=card.querySelector('.sensor-mode').value==='avg'?'avg':'max';p.sensors=[];card.querySelectorAll('.sensor-check:checked').forEach(ch=>{const s=findSensor(ch.value);if(!s)return;if(s.type==='nvidia')p.sensors.push({type:'nvidia',uuid:s.uuid,label:s.label});else if(s.type==='array_max')p.sensors.push({type:'array_max',label:s.label});else if(s.type==='hwmon')p.sensors.push({type:'hwmon',chip:s.chip,device:s.device,input:s.input,label:s.label});});
+    p.min_pwm=Number(card.querySelector('.min-pwm').value)||0;p.critical_temp=Number(card.querySelector('.critical-temp').value)||80;p.failsafe_pwm=Number(card.querySelector('.failsafe-pwm').value)||100;p.min_rpm=Number(card.querySelector('.min-rpm').value)||0;p.rpm_guard_pwm=Number(card.querySelector('.rpm-guard-pwm').value)||35;
+    p.curve=[...card.querySelectorAll('.sfc-curve tbody tr')].map(tr=>({temp:Number(tr.querySelector('.curve-temp').value),pwm:Number(tr.querySelector('.curve-pwm').value)})).filter(x=>Number.isFinite(x.temp)&&Number.isFinite(x.pwm)).sort((a,b)=>a.temp-b.temp);
+  });
+}
+async function scan(show=true){try{syncFromDom();const d=await post('scan');hw=d.hardware||hw;if(d.config&&cfg.profiles.length===0)cfg=d.config;render();if(show)msg(`扫描完成：${hw.pwms.length} 个 PWM，${hw.fans.length} 个 RPM，${allSensors().length} 个温度源。`);}catch(e){msg('扫描失败：'+e.message,false)}}
+async function save(){try{syncFromDom();for(const p of cfg.profiles){if(p.enabled&&!p.pwm)throw new Error(`${p.name} 未选择 PWM 控制器`);if(p.enabled&&!p.sensors.length)throw new Error(`${p.name} 未选择温度传感器`);if(p.enabled&&p.curve.length<2)throw new Error(`${p.name} 至少需要 2 个曲线节点`);}const d=await post('save',{payload:JSON.stringify(cfg)});cfg=d.config||cfg;msg(cfg.enabled?'配置已保存，控制服务已重新启动。':'配置已保存，控制服务已停止并恢复 PWM 原控制模式。');await refreshStatus();}catch(e){msg('保存失败：'+e.message,false)}}
+async function refreshStatus(){try{const d=await post('status');lastStatus=d.status||{};const running=!!d.running;$('#sfc-dot').className='sfc-dot '+(running?'run':'stop');$('#sfc-service-text').textContent=running?'服务运行中':'服务未运行';root.querySelectorAll('.sfc-card').forEach(card=>{const st=(lastStatus.profiles||{})[card.dataset.id];if(!st)return;card.querySelector('.live-temp').textContent=st.temperature==null?'--':st.temperature+' °C';card.querySelector('.live-pwm').textContent=st.applied_pwm==null?'--':st.applied_pwm+'%';card.querySelector('.live-rpm').textContent=st.rpm==null?'--':st.rpm+' RPM';card.querySelector('.live-state').textContent=st.reason||st.state||'--';});}catch(e){$('#sfc-dot').className='sfc-dot stop';$('#sfc-service-text').textContent='状态读取失败';}}
+$('#sfc-add').addEventListener('click',()=>{syncFromDom();cfg.profiles.push(defaultProfile());render();});
+$('#sfc-scan').addEventListener('click',()=>scan(true));
+$('#sfc-save').addEventListener('click',save);
+async function init(){try{const d=await post('scan');hw=d.hardware||hw;cfg=d.config||cfg;render();await refreshStatus();}catch(e){render();msg('初始化失败：'+e.message,false);}pollTimer=setInterval(refreshStatus,5000);}
+init();
+})();
+</script>
+]]></INLINE>
+</FILE>
+<FILE Name="/usr/local/emhttp/plugins/smartfancontrol/api.php" Mode="0644">
+<INLINE><![CDATA[
+<?php
+/** Smart Fan Control AJAX API for Unraid webGui. */
+declare(strict_types=1);
+
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store');
+
+const SFC_VERSION = '0.1.3';
+const SFC_CONFIG = '/boot/config/plugins/smartfancontrol/config.json';
+const SFC_RUN = '/run/smartfancontrol';
+const SFC_STATUS = SFC_RUN . '/status.json';
+const SFC_PID = SFC_RUN . '/smartfancontrol.pid';
+const SFC_RC = '/etc/rc.d/rc.smartfancontrol';
+
+function respond(array $data, int $status = 200): never {
+    http_response_code($status);
+    echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function readJson(string $path, array $fallback = []): array {
+    $raw = @file_get_contents($path);
+    if ($raw === false) return $fallback;
+    $d = json_decode($raw, true);
+    return is_array($d) ? $d : $fallback;
+}
+
+function writeJsonAtomic(string $file, array $data): bool {
+    @mkdir(dirname($file), 0755, true);
+    $tmp = $file . '.tmp.' . getmypid();
+    $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if ($json === false || @file_put_contents($tmp, $json . "\n", LOCK_EX) === false) return false;
+    @chmod($tmp, 0644);
+    return @rename($tmp, $file);
+}
+
+function defaultConfig(): array {
+    return ['version' => 1, 'enabled' => false, 'interval' => 5, 'profiles' => []];
+}
+
+function devicePath(string $hw): string {
+    $p = @realpath($hw . '/device');
+    if ($p === false) $p = @realpath($hw);
+    return $p === false ? '' : $p;
+}
+
+function scanHardware(): array {
+    $pwms = [];
+    $fans = [];
+    $temps = [];
+    foreach (glob('/sys/class/hwmon/hwmon*') ?: [] as $hw) {
+        $chip = trim((string)@file_get_contents($hw . '/name'));
+        if ($chip === '') continue;
+        $device = devicePath($hw);
+
+        foreach (glob($hw . '/pwm[0-9]*') ?: [] as $path) {
+            $base = basename($path);
+            if (!preg_match('/^pwm[0-9]+$/', $base)) continue;
+            $raw = trim((string)@file_get_contents($path));
+            $pwms[] = [
+                'id' => 'hwmon|' . $chip . '|' . $device . '|' . $base,
+                'chip' => $chip, 'device' => $device, 'channel' => $base,
+                'label' => $chip . ' - ' . $base,
+                'raw' => is_numeric($raw) ? (int)$raw : null,
+            ];
+        }
+
+        foreach (glob($hw . '/fan*_input') ?: [] as $path) {
+            $base = basename($path);
+            $raw = trim((string)@file_get_contents($path));
+            $labelFile = preg_replace('/_input$/', '_label', $path);
+            $label = is_file($labelFile) ? trim((string)@file_get_contents($labelFile)) : $base;
+            $fans[] = [
+                'id' => 'hwmon|' . $chip . '|' . $device . '|' . $base,
+                'chip' => $chip, 'device' => $device, 'channel' => $base,
+                'label' => $chip . ' - ' . $label,
+                'rpm' => is_numeric($raw) ? (int)$raw : null,
+            ];
+        }
+
+        foreach (glob($hw . '/temp*_input') ?: [] as $path) {
+            $base = basename($path);
+            $raw = trim((string)@file_get_contents($path));
+            if (!is_numeric($raw)) continue;
+            $v = (float)$raw;
+            if (abs($v) > 500) $v /= 1000.0;
+            if ($v < -50 || $v > 200) continue; // Filter obvious bogus NCT values.
+            $stem = preg_replace('/_input$/', '', $path);
+            $label = is_file($stem . '_label') ? trim((string)@file_get_contents($stem . '_label')) : basename($stem);
+            $temps[] = [
+                'id' => 'hwtemp|' . $chip . '|' . $device . '|' . $base,
+                'type' => 'hwmon', 'chip' => $chip, 'device' => $device, 'input' => $base,
+                'label' => $chip . ' - ' . $label,
+                'temp' => round($v, 1),
+            ];
+        }
+    }
+
+    $gpus = [];
+    $nvidia = '/usr/bin/nvidia-smi';
+    if (is_executable($nvidia)) {
+        $lines = []; $rc = 0;
+        @exec(escapeshellarg($nvidia) . ' --query-gpu=index,uuid,name,temperature.gpu --format=csv,noheader,nounits 2>/dev/null', $lines, $rc);
+        if ($rc === 0) {
+            foreach ($lines as $line) {
+                $p = array_map('trim', str_getcsv($line));
+                if (count($p) < 4 || !is_numeric($p[3])) continue;
+                $gpus[] = [
+                    'id' => 'nvidia|' . $p[1],
+                    'type' => 'nvidia', 'index' => (int)$p[0], 'uuid' => $p[1], 'name' => $p[2],
+                    'label' => 'NVIDIA ' . $p[2] . ' (GPU ' . $p[0] . ')', 'temp' => (float)$p[3],
+                ];
+            }
+        }
+    }
+
+    $arrayMax = null;
+    $rawDisks = @file_get_contents('/var/local/emhttp/disks.ini');
+    if ($rawDisks !== false && preg_match_all('/^temp="?([0-9]{1,3})"?/m', $rawDisks, $m)) {
+        $vals = array_filter(array_map('intval', $m[1]), fn($x) => $x > 0 && $x < 100);
+        if ($vals) $arrayMax = max($vals);
+    }
+    if ($arrayMax !== null) {
+        $temps[] = [
+            'id' => 'array|max', 'type' => 'array_max', 'label' => 'Array disks - highest temperature', 'temp' => (float)$arrayMax,
+        ];
+    }
+
+    usort($pwms, fn($a,$b) => strcmp($a['label'],$b['label']));
+    usort($fans, fn($a,$b) => strcmp($a['label'],$b['label']));
+    usort($temps, fn($a,$b) => strcmp($a['label'],$b['label']));
+    return ['pwms' => $pwms, 'fans' => $fans, 'temps' => $temps, 'gpus' => $gpus];
+}
+
+function clampFloat(mixed $v, float $min, float $max, float $default): float {
+    if (!is_numeric($v)) return $default;
+    return max($min, min($max, (float)$v));
+}
+
+function sanitizeSelector(mixed $v, string $kind): ?array {
+    if (!is_array($v)) return null;
+    $chip = trim((string)($v['chip'] ?? ''));
+    $channel = basename(trim((string)($v['channel'] ?? '')));
+    $device = trim((string)($v['device'] ?? ''));
+    $rx = $kind === 'pwm' ? '/^pwm[0-9]+$/' : '/^fan[0-9]+_input$/';
+    if ($chip === '' || !preg_match($rx, $channel)) return null;
+    return ['chip' => $chip, 'device' => $device, 'channel' => $channel];
+}
+
+function sanitizeSensor(mixed $s): ?array {
+    if (!is_array($s)) return null;
+    $type = (string)($s['type'] ?? '');
+    $label = trim((string)($s['label'] ?? 'sensor'));
+    if ($type === 'nvidia') {
+        $uuid = trim((string)($s['uuid'] ?? ''));
+        if ($uuid === '') return null;
+        return ['type' => 'nvidia', 'uuid' => $uuid, 'label' => $label];
+    }
+    if ($type === 'array_max') return ['type' => 'array_max', 'label' => $label ?: 'Array max'];
+    if ($type === 'hwmon') {
+        $chip = trim((string)($s['chip'] ?? ''));
+        $device = trim((string)($s['device'] ?? ''));
+        $input = basename(trim((string)($s['input'] ?? '')));
+        if ($chip === '' || !preg_match('/^temp[0-9]+_input$/', $input)) return null;
+        return ['type' => 'hwmon', 'chip' => $chip, 'device' => $device, 'input' => $input, 'label' => $label];
+    }
+    return null;
+}
+
+function sanitizeConfig(array $input): array {
+    $out = defaultConfig();
+    $out['enabled'] = !empty($input['enabled']);
+    $out['interval'] = max(2, min(60, (int)($input['interval'] ?? 5)));
+    $profiles = [];
+    foreach (($input['profiles'] ?? []) as $idx => $p) {
+        if (!is_array($p)) continue;
+        $pwm = sanitizeSelector($p['pwm'] ?? null, 'pwm');
+        if ($pwm === null) continue;
+        $rpm = sanitizeSelector($p['rpm'] ?? null, 'fan');
+        $sensors = [];
+        foreach (($p['sensors'] ?? []) as $s) {
+            $clean = sanitizeSensor($s);
+            if ($clean) $sensors[] = $clean;
+        }
+        if (!$sensors) continue;
+        $curve = [];
+        foreach (($p['curve'] ?? []) as $pt) {
+            if (!is_array($pt) || !is_numeric($pt['temp'] ?? null) || !is_numeric($pt['pwm'] ?? null)) continue;
+            $curve[] = ['temp' => clampFloat($pt['temp'], -20, 150, 40), 'pwm' => clampFloat($pt['pwm'], 0, 100, 50)];
+        }
+        usort($curve, fn($a,$b) => $a['temp'] <=> $b['temp']);
+        if (count($curve) < 2) $curve = [['temp'=>40,'pwm'=>40],['temp'=>75,'pwm'=>100]];
+        $id = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($p['id'] ?? '')) ?: ('fan_' . ($idx + 1));
+        $profiles[] = [
+            'id' => substr($id, 0, 48),
+            'name' => substr(trim((string)($p['name'] ?? 'Fan ' . ($idx + 1))), 0, 80),
+            'enabled' => !empty($p['enabled']),
+            'pwm' => $pwm,
+            'rpm' => $rpm,
+            'sensor_mode' => (($p['sensor_mode'] ?? 'max') === 'avg') ? 'avg' : 'max',
+            'sensors' => $sensors,
+            'curve' => $curve,
+            'critical_temp' => clampFloat($p['critical_temp'] ?? 80, 20, 150, 80),
+            'failsafe_pwm' => clampFloat($p['failsafe_pwm'] ?? 100, 20, 100, 100),
+            'min_pwm' => clampFloat($p['min_pwm'] ?? 30, 0, 100, 30),
+            'min_rpm' => max(0, min(30000, (int)($p['min_rpm'] ?? 0))),
+            'rpm_guard_pwm' => clampFloat($p['rpm_guard_pwm'] ?? 35, 0, 100, 35),
+        ];
+    }
+    $out['profiles'] = $profiles;
+    return $out;
+}
+
+function daemonRunning(): bool {
+    if (!is_file(SFC_PID)) return false;
+    $pid = (int)trim((string)@file_get_contents(SFC_PID));
+    return $pid > 1 && is_dir('/proc/' . $pid);
+}
+
+function runRc(string $action): array {
+    if (!in_array($action, ['start','stop','restart','status'], true)) return ['rc'=>2,'output'=>'invalid action'];
+    $out = []; $rc = 0;
+    @exec(escapeshellarg(SFC_RC) . ' ' . escapeshellarg($action) . ' 2>&1', $out, $rc);
+    return ['rc' => $rc, 'output' => implode("\n", $out)];
+}
+
+$action = (string)($_POST['action'] ?? $_GET['action'] ?? 'status');
+
+switch ($action) {
+    case 'scan':
+        respond(['ok' => true, 'hardware' => scanHardware(), 'config' => readJson(SFC_CONFIG, defaultConfig())]);
+    case 'status':
+        respond(['ok' => true, 'running' => daemonRunning(), 'status' => readJson(SFC_STATUS, []), 'config' => readJson(SFC_CONFIG, defaultConfig())]);
+    case 'save':
+        $payload = json_decode((string)($_POST['payload'] ?? ''), true);
+        if (!is_array($payload)) respond(['ok' => false, 'error' => 'Invalid JSON payload'], 400);
+        $config = sanitizeConfig($payload);
+        if (!writeJsonAtomic(SFC_CONFIG, $config)) respond(['ok' => false, 'error' => 'Unable to write configuration'], 500);
+        $result = runRc($config['enabled'] ? 'restart' : 'stop');
+        respond(['ok' => $result['rc'] === 0 || !$config['enabled'], 'config' => $config, 'service' => $result]);
+    case 'start':
+    case 'stop':
+    case 'restart':
+        $result = runRc($action);
+        respond(['ok' => $result['rc'] === 0, 'service' => $result, 'running' => daemonRunning()]);
+    default:
+        respond(['ok' => false, 'error' => 'Unknown action'], 400);
+}
+]]></INLINE>
+</FILE>
+<FILE Name="/usr/local/emhttp/plugins/smartfancontrol/default.json" Mode="0644">
+<INLINE><![CDATA[
+{
+  "version": 1,
+  "enabled": false,
+  "interval": 5,
+  "profiles": []
+}
+]]></INLINE>
+</FILE>
+<FILE Name="/usr/local/emhttp/plugins/smartfancontrol/scripts/smartfan-daemon.php" Mode="0755">
+<INLINE><![CDATA[
+#!/usr/bin/php
+<?php
+/**
+ * Smart Fan Control daemon for Unraid.
+ *
+ * Controls multiple hwmon PWM channels from one or more temperature sensors.
+ * Designed to survive hwmonX renumbering by resolving chip name + device path
+ * on every scan instead of persisting /sys/class/hwmon/hwmonX paths.
+ */
+
+declare(strict_types=1);
+
+const SFC_VERSION = '0.1.3';
+
+function envp(string $name, string $default): string {
+    $v = getenv($name);
+    return ($v === false || $v === '') ? $default : $v;
+}
+
+function paths(): array {
+    $run = envp('SFC_RUN_DIR', '/run/smartfancontrol');
+    return [
+        'config' => envp('SFC_CONFIG', '/boot/config/plugins/smartfancontrol/config.json'),
+        'run' => $run,
+        'pid' => $run . '/smartfancontrol.pid',
+        'status' => $run . '/status.json',
+        'restore' => $run . '/restore.json',
+        'log' => envp('SFC_LOG', '/var/log/smartfancontrol.log'),
+        'hwmon' => envp('SFC_HWMON_ROOT', '/sys/class/hwmon'),
+        'disks_ini' => envp('SFC_DISKS_INI', '/var/local/emhttp/disks.ini'),
+        'nvidia_smi' => envp('SFC_NVIDIA_SMI', '/usr/bin/nvidia-smi'),
+    ];
+}
+
+function ensureDir(string $dir): void {
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+}
+
+function logmsg(string $level, string $message): void {
+    $p = paths();
+    $line = sprintf("%s [%s] %s\n", date('Y-m-d H:i:s'), strtoupper($level), $message);
+    @file_put_contents($p['log'], $line, FILE_APPEND | LOCK_EX);
+}
+
+function readJsonFile(string $file, array $fallback = []): array {
+    $raw = @file_get_contents($file);
+    if ($raw === false || trim($raw) === '') return $fallback;
+    $data = json_decode($raw, true);
+    return is_array($data) ? $data : $fallback;
+}
+
+function writeJsonAtomic(string $file, array $data): bool {
+    ensureDir(dirname($file));
+    $tmp = $file . '.tmp.' . getmypid();
+    $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if ($json === false) return false;
+    if (@file_put_contents($tmp, $json . "\n", LOCK_EX) === false) return false;
+    @chmod($tmp, 0644);
+    return @rename($tmp, $file);
+}
+
+function readTrim(string $file): ?string {
+    $v = @file_get_contents($file);
+    if ($v === false) return null;
+    return trim($v);
+}
+
+function realDeviceForHwmon(string $hwdir): string {
+    $device = @realpath($hwdir . '/device');
+    if ($device === false) {
+        $device = @realpath($hwdir);
+    }
+    return $device === false ? '' : $device;
+}
+
+function scanHwmon(): array {
+    $p = paths();
+    $out = [];
+    foreach (glob(rtrim($p['hwmon'], '/') . '/hwmon*') ?: [] as $hwdir) {
+        $name = readTrim($hwdir . '/name');
+        if ($name === null || $name === '') continue;
+        $out[] = [
+            'path' => $hwdir,
+            'chip' => $name,
+            'device' => realDeviceForHwmon($hwdir),
+        ];
+    }
+    return $out;
+}
+
+function selectorDeviceMatch(array $selector, string $device): bool {
+    $wanted = (string)($selector['device'] ?? '');
+    if ($wanted === '') return true;
+    if ($device === $wanted) return true;
+    // Allow persistent suffix matching across /sys path changes.
+    return str_ends_with($device, $wanted) || str_ends_with($wanted, basename($device));
+}
+
+function resolveHwmonSelector(array $selector): ?string {
+    $chip = (string)($selector['chip'] ?? '');
+    if ($chip === '') return null;
+    foreach (scanHwmon() as $h) {
+        if ($h['chip'] !== $chip) continue;
+        if (!selectorDeviceMatch($selector, $h['device'])) continue;
+        return $h['path'];
+    }
+    return null;
+}
+
+function resolveChannel(array $selector, string $prefix): ?string {
+    $hw = resolveHwmonSelector($selector);
+    if ($hw === null) return null;
+    $channel = basename((string)($selector['channel'] ?? ''));
+    if ($channel === '' || !preg_match('/^' . preg_quote($prefix, '/') . '[0-9]+(?:_input)?$/', $channel)) return null;
+    $path = $hw . '/' . $channel;
+    return is_file($path) ? $path : null;
+}
+
+function queryNvidia(): array {
+    static $cacheTime = 0.0;
+    static $cache = [];
+    $now = microtime(true);
+    if (($now - $cacheTime) < 1.0) return $cache;
+    $cacheTime = $now;
+    $cache = [];
+    $p = paths();
+    $bin = $p['nvidia_smi'];
+    if (!is_executable($bin)) return [];
+    $cmd = escapeshellarg($bin) . ' --query-gpu=index,uuid,name,temperature.gpu --format=csv,noheader,nounits 2>/dev/null';
+    $lines = [];
+    $rc = 0;
+    @exec($cmd, $lines, $rc);
+    if ($rc !== 0) return [];
+    foreach ($lines as $line) {
+        $parts = array_map('trim', str_getcsv($line));
+        if (count($parts) < 4) continue;
+        [$index, $uuid, $name, $temp] = $parts;
+        if (!is_numeric($temp)) continue;
+        $cache[$uuid] = [
+            'index' => (int)$index,
+            'uuid' => $uuid,
+            'name' => $name,
+            'temp' => (float)$temp,
+        ];
+    }
+    return $cache;
+}
+
+function readArrayMaxTemp(): ?float {
+    $p = paths();
+    $raw = @file_get_contents($p['disks_ini']);
+    if ($raw === false) return null;
+    if (!preg_match_all('/^temp="?([0-9]{1,3})"?/m', $raw, $m)) return null;
+    $temps = [];
+    foreach ($m[1] as $v) {
+        $t = (int)$v;
+        if ($t > 0 && $t < 100) $temps[] = $t;
+    }
+    return $temps ? (float)max($temps) : null;
+}
+
+function readTemperatureSensor(array $sensor): ?float {
+    $type = (string)($sensor['type'] ?? '');
+    if ($type === 'nvidia') {
+        $uuid = (string)($sensor['uuid'] ?? '');
+        $gpus = queryNvidia();
+        return isset($gpus[$uuid]) ? (float)$gpus[$uuid]['temp'] : null;
+    }
+    if ($type === 'array_max') {
+        return readArrayMaxTemp();
+    }
+    if ($type === 'hwmon') {
+        $hw = resolveHwmonSelector($sensor);
+        if ($hw === null) return null;
+        $input = basename((string)($sensor['input'] ?? ''));
+        if (!preg_match('/^temp[0-9]+_input$/', $input)) return null;
+        $raw = readTrim($hw . '/' . $input);
+        if ($raw === null || !is_numeric($raw)) return null;
+        $v = (float)$raw;
+        // Linux hwmon temperatures are normally millidegrees Celsius.
+        if (abs($v) > 500) $v /= 1000.0;
+        if ($v < -50 || $v > 200) return null;
+        return $v;
+    }
+    return null;
+}
+
+function aggregateSensors(array $sensors, string $mode): array {
+    $values = [];
+    $details = [];
+    foreach ($sensors as $sensor) {
+        if (!is_array($sensor)) continue;
+        $t = readTemperatureSensor($sensor);
+        $details[] = [
+            'label' => (string)($sensor['label'] ?? $sensor['name'] ?? $sensor['type'] ?? 'sensor'),
+            'temp' => $t,
+            'ok' => $t !== null,
+        ];
+        if ($t !== null) $values[] = $t;
+    }
+    if (!$values) return ['temp' => null, 'details' => $details];
+    $temp = ($mode === 'avg') ? array_sum($values) / count($values) : max($values);
+    return ['temp' => round($temp, 1), 'details' => $details];
+}
+
+function normalizeCurve(array $curve): array {
+    $out = [];
+    foreach ($curve as $pt) {
+        if (!is_array($pt) || !isset($pt['temp'], $pt['pwm'])) continue;
+        if (!is_numeric($pt['temp']) || !is_numeric($pt['pwm'])) continue;
+        $out[] = [
+            'temp' => max(-20.0, min(150.0, (float)$pt['temp'])),
+            'pwm' => max(0.0, min(100.0, (float)$pt['pwm'])),
+        ];
+    }
+    usort($out, fn($a, $b) => $a['temp'] <=> $b['temp']);
+    // De-duplicate temperatures; last point wins.
+    $dedup = [];
+    foreach ($out as $pt) $dedup[(string)$pt['temp']] = $pt;
+    $out = array_values($dedup);
+    usort($out, fn($a, $b) => $a['temp'] <=> $b['temp']);
+    return $out;
+}
+
+function curvePwm(float $temp, array $curve): float {
+    $curve = normalizeCurve($curve);
+    if (!$curve) return 100.0;
+    if (count($curve) === 1) return (float)$curve[0]['pwm'];
+    if ($temp <= $curve[0]['temp']) return (float)$curve[0]['pwm'];
+    $last = $curve[count($curve) - 1];
+    if ($temp >= $last['temp']) return (float)$last['pwm'];
+    for ($i = 1; $i < count($curve); $i++) {
+        $b = $curve[$i];
+        $a = $curve[$i - 1];
+        if ($temp <= $b['temp']) {
+            $span = $b['temp'] - $a['temp'];
+            if ($span <= 0) return (float)$b['pwm'];
+            $ratio = ($temp - $a['temp']) / $span;
+            return $a['pwm'] + (($b['pwm'] - $a['pwm']) * $ratio);
+        }
+    }
+    return 100.0;
+}
+
+function pctToRaw(float $pct): int {
+    $pct = max(0.0, min(100.0, $pct));
+    return (int)round($pct * 255.0 / 100.0);
+}
+
+function rawToPct(int $raw): float {
+    return round(max(0, min(255, $raw)) * 100.0 / 255.0, 1);
+}
+
+function readRpm(?array $selector): ?int {
+    if (!$selector) return null;
+    $path = resolveChannel($selector, 'fan');
+    if ($path === null) return null;
+    $v = readTrim($path);
+    return ($v !== null && is_numeric($v)) ? max(0, (int)$v) : null;
+}
+
+function loadRestore(): array {
+    return readJsonFile(paths()['restore'], ['channels' => []]);
+}
+
+function saveRestore(array $restore): void {
+    writeJsonAtomic(paths()['restore'], $restore);
+}
+
+function selectorKey(array $selector): string {
+    return implode('|', [
+        (string)($selector['chip'] ?? ''),
+        (string)($selector['device'] ?? ''),
+        (string)($selector['channel'] ?? ''),
+    ]);
+}
+
+function ensureManualMode(array $selector): array {
+    $pwmPath = resolveChannel($selector, 'pwm');
+    if ($pwmPath === null) return ['ok' => false, 'error' => 'PWM channel not found'];
+    $channel = basename($pwmPath);
+    if (!preg_match('/^pwm([0-9]+)$/', $channel, $m)) return ['ok' => false, 'error' => 'Invalid PWM channel'];
+    $enablePath = dirname($pwmPath) . '/pwm' . $m[1] . '_enable';
+    $restore = loadRestore();
+    $restore['channels'] ??= [];
+    $key = selectorKey($selector);
+    if (!isset($restore['channels'][$key])) {
+        $orig = is_file($enablePath) ? readTrim($enablePath) : null;
+        $restore['channels'][$key] = [
+            'selector' => $selector,
+            'enable_original' => ($orig !== null && is_numeric($orig)) ? (int)$orig : null,
+            'enable_path_hint' => $enablePath,
+        ];
+        saveRestore($restore);
+    }
+    if (is_file($enablePath) && is_writable($enablePath)) {
+        // Nuvoton and most hwmon PWM drivers use 1 for manual mode.
+        if (@file_put_contents($enablePath, "1\n") === false) {
+            return ['ok' => false, 'error' => 'Unable to set manual PWM mode'];
+        }
+    }
+    return ['ok' => true, 'pwm_path' => $pwmPath, 'enable_path' => $enablePath];
+}
+
+function setPwm(array $selector, float $pct): array {
+    $manual = ensureManualMode($selector);
+    if (!$manual['ok']) return $manual;
+    $raw = pctToRaw($pct);
+    $pwmPath = $manual['pwm_path'];
+    if (!is_writable($pwmPath)) return ['ok' => false, 'error' => 'PWM channel is not writable'];
+    if (@file_put_contents($pwmPath, (string)$raw . "\n") === false) {
+        return ['ok' => false, 'error' => 'PWM write failed'];
+    }
+    return ['ok' => true, 'raw' => $raw, 'pct' => rawToPct($raw)];
+}
+
+function restoreControllers(): int {
+    $p = paths();
+    $restore = loadRestore();
+    $count = 0;
+    foreach (($restore['channels'] ?? []) as $entry) {
+        if (!is_array($entry) || !isset($entry['selector'])) continue;
+        $sel = $entry['selector'];
+        $pwmPath = resolveChannel($sel, 'pwm');
+        if ($pwmPath === null) continue;
+        if (!preg_match('/^pwm([0-9]+)$/', basename($pwmPath), $m)) continue;
+        $enablePath = dirname($pwmPath) . '/pwm' . $m[1] . '_enable';
+        $orig = $entry['enable_original'] ?? null;
+        if ($orig !== null && is_file($enablePath) && is_writable($enablePath)) {
+            if (@file_put_contents($enablePath, (string)((int)$orig) . "\n") !== false) $count++;
+        }
+    }
+    @unlink($p['restore']);
+    logmsg('info', "Restored {$count} PWM controller enable modes");
+    return $count;
+}
+
+function validateProfile(array $profile): bool {
+    return !empty($profile['enabled'])
+        && is_array($profile['pwm'] ?? null)
+        && !empty($profile['sensors'])
+        && is_array($profile['curve'] ?? null);
+}
+
+function controlCycle(array $config, array &$runtime): array {
+    $status = [
+        'version' => SFC_VERSION,
+        'running' => true,
+        'timestamp' => time(),
+        'profiles' => [],
+    ];
+    $activeKeys = [];
+    foreach (($config['profiles'] ?? []) as $profile) {
+        if (!is_array($profile)) continue;
+        $id = (string)($profile['id'] ?? uniqid('fan_', false));
+        $name = (string)($profile['name'] ?? $id);
+        $entry = ['name' => $name, 'enabled' => !empty($profile['enabled'])];
+        if (!validateProfile($profile)) {
+            $entry['state'] = 'disabled';
+            $status['profiles'][$id] = $entry;
+            continue;
+        }
+
+        $pwmSelector = $profile['pwm'];
+        $activeKeys[selectorKey($pwmSelector)] = true;
+        $mode = (($profile['sensor_mode'] ?? 'max') === 'avg') ? 'avg' : 'max';
+        $agg = aggregateSensors((array)$profile['sensors'], $mode);
+        $temp = $agg['temp'];
+        $failsafe = max(0.0, min(100.0, (float)($profile['failsafe_pwm'] ?? 100)));
+        $critical = (float)($profile['critical_temp'] ?? 80);
+        $reason = 'curve';
+
+        if ($temp === null) {
+            $target = $failsafe;
+            $reason = 'sensor-failsafe';
+        } elseif ($temp >= $critical) {
+            $target = 100.0;
+            $reason = 'critical-temperature';
+        } else {
+            $target = curvePwm((float)$temp, (array)$profile['curve']);
+        }
+
+        $minPwm = max(0.0, min(100.0, (float)($profile['min_pwm'] ?? 0)));
+        if ($target > 0 && $target < $minPwm) $target = $minPwm;
+
+        $rpm = readRpm(is_array($profile['rpm'] ?? null) ? $profile['rpm'] : null);
+        $minRpm = max(0, (int)($profile['min_rpm'] ?? 0));
+        $guardPwm = max(0.0, min(100.0, (float)($profile['rpm_guard_pwm'] ?? 35)));
+        $stallKey = $id . ':stall';
+        if ($minRpm > 0 && $target >= $guardPwm && $rpm !== null && $rpm < $minRpm) {
+            $runtime[$stallKey] = ($runtime[$stallKey] ?? 0) + 1;
+        } else {
+            $runtime[$stallKey] = 0;
+        }
+        if (($runtime[$stallKey] ?? 0) >= 3) {
+            $target = 100.0;
+            $reason = 'rpm-failsafe';
+        }
+
+        $write = setPwm($pwmSelector, $target);
+        $entry += [
+            'state' => $write['ok'] ? 'ok' : 'error',
+            'temperature' => $temp,
+            'sensors' => $agg['details'],
+            'target_pwm' => round($target, 1),
+            'applied_pwm' => $write['ok'] ? $write['pct'] : null,
+            'rpm' => $rpm,
+            'reason' => $reason,
+            'error' => $write['ok'] ? null : ($write['error'] ?? 'unknown PWM error'),
+        ];
+        $status['profiles'][$id] = $entry;
+    }
+
+    // Restore any controller that was previously controlled but is no longer active.
+    $restore = loadRestore();
+    $changed = false;
+    foreach (($restore['channels'] ?? []) as $key => $entry) {
+        if (isset($activeKeys[$key])) continue;
+        if (!is_array($entry) || !isset($entry['selector'])) continue;
+        $sel = $entry['selector'];
+        $pwmPath = resolveChannel($sel, 'pwm');
+        if ($pwmPath !== null && preg_match('/^pwm([0-9]+)$/', basename($pwmPath), $m)) {
+            $enablePath = dirname($pwmPath) . '/pwm' . $m[1] . '_enable';
+            $orig = $entry['enable_original'] ?? null;
+            if ($orig !== null && is_file($enablePath) && is_writable($enablePath)) {
+                @file_put_contents($enablePath, (string)((int)$orig) . "\n");
+            }
+        }
+        unset($restore['channels'][$key]);
+        $changed = true;
+    }
+    if ($changed) saveRestore($restore);
+
+    return $status;
+}
+
+function defaultConfig(): array {
+    return [
+        'version' => 1,
+        'enabled' => false,
+        'interval' => 5,
+        'profiles' => [],
+    ];
+}
+
+function runDaemon(bool $once = false): int {
+    $p = paths();
+    ensureDir($p['run']);
+    $runtime = [];
+    @file_put_contents($p['pid'], (string)getmypid() . "\n");
+    logmsg('info', 'Smart Fan Control daemon started');
+    $lastConfigHash = '';
+    do {
+        $config = readJsonFile($p['config'], defaultConfig());
+        if (empty($config['enabled'])) {
+            restoreControllers();
+            writeJsonAtomic($p['status'], [
+                'version' => SFC_VERSION,
+                'running' => true,
+                'timestamp' => time(),
+                'profiles' => [],
+                'message' => 'Global control is disabled',
+            ]);
+        } else {
+            $hash = md5(json_encode($config));
+            if ($hash !== $lastConfigHash) {
+                logmsg('info', 'Configuration loaded/changed');
+                $lastConfigHash = $hash;
+            }
+            $status = controlCycle($config, $runtime);
+            writeJsonAtomic($p['status'], $status);
+        }
+        if ($once) break;
+        $interval = max(2, min(60, (int)($config['interval'] ?? 5)));
+        sleep($interval);
+    } while (true);
+    @unlink($p['pid']);
+    if ($once) restoreControllers();
+    return 0;
+}
+
+function usage(): void {
+    fwrite(STDOUT, "Smart Fan Control " . SFC_VERSION . "\n");
+    fwrite(STDOUT, "Usage: smartfan-daemon.php [--daemon|--once|--restore|--scan]\n");
+}
+
+$arg = $argv[1] ?? '--daemon';
+if ($arg === '--restore') {
+    exit(restoreControllers() >= 0 ? 0 : 1);
+}
+if ($arg === '--once') {
+    exit(runDaemon(true));
+}
+if ($arg === '--scan') {
+    echo json_encode(scanHwmon(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+    exit(0);
+}
+if ($arg === '--daemon') {
+    exit(runDaemon(false));
+}
+usage();
+exit(2);
+]]></INLINE>
+</FILE>
+<FILE Name="/usr/local/emhttp/plugins/smartfancontrol/scripts/rc.smartfancontrol" Mode="0755">
+<INLINE><![CDATA[
+#!/bin/bash
+
+NAME="smartfancontrol"
+PLUGIN_DIR="/usr/local/emhttp/plugins/$NAME"
+DAEMON="$PLUGIN_DIR/scripts/smartfan-daemon.php"
+CONFIG="/boot/config/plugins/$NAME/config.json"
+RUN_DIR="/run/$NAME"
+PID_FILE="$RUN_DIR/$NAME.pid"
+LOG="/var/log/$NAME.log"
+
+is_running() {
+  if [[ -f "$PID_FILE" ]]; then
+    local pid
+    pid="$(cat "$PID_FILE" 2>/dev/null)"
+    if [[ -n "$pid" && -d "/proc/$pid" ]]; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+start_service() {
+  mkdir -p "$RUN_DIR" /boot/config/plugins/$NAME
+  if is_running; then
+    echo "$NAME already running"
+    return 0
+  fi
+
+  # Recover from a previous crash before taking control again.
+  if [[ -x "$DAEMON" ]]; then
+    "$DAEMON" --restore >/dev/null 2>&1 || true
+  fi
+
+  local enabled="false"
+  if [[ -f "$CONFIG" ]]; then
+    enabled="$(php -r '$d=@json_decode(@file_get_contents($argv[1]),true); echo !empty($d["enabled"])?"true":"false";' "$CONFIG" 2>/dev/null)"
+  fi
+  if [[ "$enabled" != "true" ]]; then
+    echo "$NAME configured but globally disabled"
+    return 0
+  fi
+
+  nohup "$DAEMON" --daemon >>"$LOG" 2>&1 &
+  local pid=$!
+  sleep 0.3
+  if [[ -d "/proc/$pid" ]]; then
+    echo "$pid" > "$PID_FILE"
+    echo "$NAME started (pid $pid)"
+    return 0
+  fi
+  echo "failed to start $NAME"
+  return 1
+}
+
+stop_service() {
+  if is_running; then
+    local pid
+    pid="$(cat "$PID_FILE" 2>/dev/null)"
+    kill "$pid" 2>/dev/null || true
+    for _ in {1..30}; do
+      [[ ! -d "/proc/$pid" ]] && break
+      sleep 0.1
+    done
+    if [[ -d "/proc/$pid" ]]; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  fi
+  rm -f "$PID_FILE"
+  if [[ -x "$DAEMON" ]]; then
+    "$DAEMON" --restore >/dev/null 2>&1 || true
+  fi
+  echo "$NAME stopped"
+}
+
+status_service() {
+  if is_running; then
+    echo "running (pid $(cat "$PID_FILE"))"
+    return 0
+  fi
+  echo "stopped"
+  return 1
+}
+
+case "${1:-status}" in
+  start) start_service ;;
+  stop) stop_service ;;
+  restart) stop_service; start_service ;;
+  status) status_service ;;
+  restore) "$DAEMON" --restore ;;
+  *) echo "Usage: $0 {start|stop|restart|status|restore}"; exit 2 ;;
+esac
+]]></INLINE>
+</FILE>
+<FILE Name="/usr/local/emhttp/plugins/smartfancontrol/scripts/diagnose.sh" Mode="0755">
+<INLINE><![CDATA[
+#!/bin/bash
+set +e
+
+echo "=== Smart Fan Control diagnostics ==="
+date
+echo
+
+echo "[Service]"
+/etc/rc.d/rc.smartfancontrol status 2>&1
+echo
+
+echo "[NVIDIA]"
+if command -v nvidia-smi >/dev/null 2>&1; then
+  nvidia-smi --query-gpu=index,uuid,name,temperature.gpu --format=csv,noheader,nounits 2>&1
+else
+  echo "nvidia-smi not found"
+fi
+echo
+
+echo "[hwmon]"
+for h in /sys/class/hwmon/hwmon*; do
+  [[ -d "$h" ]] || continue
+  name="$(cat "$h/name" 2>/dev/null)"
+  [[ -n "$name" ]] || continue
+  echo "-- $h : $name --"
+  for f in "$h"/pwm[0-9]* "$h"/fan*_input "$h"/temp*_input; do
+    [[ -f "$f" ]] || continue
+    base="$(basename "$f")"
+    [[ "$base" =~ ^pwm[0-9]+$ || "$base" =~ ^pwm[0-9]+_enable$ || "$base" =~ ^fan[0-9]+_input$ || "$base" =~ ^temp[0-9]+_input$ ]] || continue
+    printf '%-18s %s\n' "$base" "$(cat "$f" 2>/dev/null)"
+  done
+done
+echo
+
+echo "[Config]"
+cat /boot/config/plugins/smartfancontrol/config.json 2>/dev/null || echo "No config"
+echo
+
+echo "[Status]"
+cat /run/smartfancontrol/status.json 2>/dev/null || echo "No runtime status"
+echo
+
+echo "[Last log lines]"
+tail -50 /var/log/smartfancontrol.log 2>/dev/null || true
+]]></INLINE>
+</FILE>
+<FILE Name="/etc/rc.d/rc.smartfancontrol" Mode="0755">
+<INLINE><![CDATA[
+#!/bin/bash
+
+NAME="smartfancontrol"
+PLUGIN_DIR="/usr/local/emhttp/plugins/$NAME"
+DAEMON="$PLUGIN_DIR/scripts/smartfan-daemon.php"
+CONFIG="/boot/config/plugins/$NAME/config.json"
+RUN_DIR="/run/$NAME"
+PID_FILE="$RUN_DIR/$NAME.pid"
+LOG="/var/log/$NAME.log"
+
+is_running() {
+  if [[ -f "$PID_FILE" ]]; then
+    local pid
+    pid="$(cat "$PID_FILE" 2>/dev/null)"
+    if [[ -n "$pid" && -d "/proc/$pid" ]]; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+start_service() {
+  mkdir -p "$RUN_DIR" /boot/config/plugins/$NAME
+  if is_running; then
+    echo "$NAME already running"
+    return 0
+  fi
+
+  # Recover from a previous crash before taking control again.
+  if [[ -x "$DAEMON" ]]; then
+    "$DAEMON" --restore >/dev/null 2>&1 || true
+  fi
+
+  local enabled="false"
+  if [[ -f "$CONFIG" ]]; then
+    enabled="$(php -r '$d=@json_decode(@file_get_contents($argv[1]),true); echo !empty($d["enabled"])?"true":"false";' "$CONFIG" 2>/dev/null)"
+  fi
+  if [[ "$enabled" != "true" ]]; then
+    echo "$NAME configured but globally disabled"
+    return 0
+  fi
+
+  nohup "$DAEMON" --daemon >>"$LOG" 2>&1 &
+  local pid=$!
+  sleep 0.3
+  if [[ -d "/proc/$pid" ]]; then
+    echo "$pid" > "$PID_FILE"
+    echo "$NAME started (pid $pid)"
+    return 0
+  fi
+  echo "failed to start $NAME"
+  return 1
+}
+
+stop_service() {
+  if is_running; then
+    local pid
+    pid="$(cat "$PID_FILE" 2>/dev/null)"
+    kill "$pid" 2>/dev/null || true
+    for _ in {1..30}; do
+      [[ ! -d "/proc/$pid" ]] && break
+      sleep 0.1
+    done
+    if [[ -d "/proc/$pid" ]]; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  fi
+  rm -f "$PID_FILE"
+  if [[ -x "$DAEMON" ]]; then
+    "$DAEMON" --restore >/dev/null 2>&1 || true
+  fi
+  echo "$NAME stopped"
+}
+
+status_service() {
+  if is_running; then
+    echo "running (pid $(cat "$PID_FILE"))"
+    return 0
+  fi
+  echo "stopped"
+  return 1
+}
+
+case "${1:-status}" in
+  start) start_service ;;
+  stop) stop_service ;;
+  restart) stop_service; start_service ;;
+  status) status_service ;;
+  restore) "$DAEMON" --restore ;;
+  *) echo "Usage: $0 {start|stop|restart|status|restore}"; exit 2 ;;
+esac
+]]></INLINE>
+</FILE>
+<FILE Run="/bin/bash">
+<INLINE><![CDATA[
+#!/bin/bash
+set -u
+mkdir -p /boot/config/plugins/smartfancontrol /run/smartfancontrol
+if [[ ! -f /boot/config/plugins/smartfancontrol/config.json ]]; then
+  cp /usr/local/emhttp/plugins/smartfancontrol/default.json /boot/config/plugins/smartfancontrol/config.json
+fi
+chmod 0644 /boot/config/plugins/smartfancontrol/config.json
+/etc/rc.d/rc.smartfancontrol start >/dev/null 2>&1 || true
+logger -t smartfancontrol "Smart Fan Control 0.1.3 installed"
+echo ""
+echo "-----------------------------------------------------------"
+echo " Smart Fan Control 0.1.3 (Beta) installed"
+echo " Open Settings -> User Utilities -> Smart Fan Control to configure it."
+echo "-----------------------------------------------------------"
+echo ""
+]]></INLINE>
+</FILE>
+<FILE Run="/bin/bash" Method="remove">
+<INLINE><![CDATA[
+#!/bin/bash
+set -u
+/etc/rc.d/rc.smartfancontrol stop >/dev/null 2>&1 || true
+rm -rf /usr/local/emhttp/plugins/smartfancontrol
+rm -f /etc/rc.d/rc.smartfancontrol
+rm -rf /run/smartfancontrol
+rm -rf /boot/config/plugins/smartfancontrol
+logger -t smartfancontrol "Smart Fan Control removed"
+]]></INLINE>
+</FILE>
+</PLUGIN>

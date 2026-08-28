@@ -1,0 +1,150 @@
+Menu="Utilities"
+Title="Smart Fan Control"
+Icon="icon-fan"
+---
+<?php
+$docroot = $_SERVER['DOCUMENT_ROOT'] ?: '/usr/local/emhttp';
+$csrf = (isset($var) && is_array($var)) ? (string)($var['csrf_token'] ?? '') : '';
+if ($csrf === '') {
+    $sfcVar = @parse_ini_file($docroot . '/state/var.ini');
+    if (!is_array($sfcVar)) $sfcVar = @parse_ini_file('/var/local/emhttp/var.ini');
+    $csrf = is_array($sfcVar) ? (string)($sfcVar['csrf_token'] ?? '') : '';
+}
+?>
+<style>
+#sfc-root{max-width:1180px;margin:12px auto 40px;padding:0 12px;box-sizing:border-box}
+#sfc-root *{box-sizing:border-box}
+.sfc-toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:12px 0 18px}
+.sfc-toolbar .grow{flex:1 1 auto}
+.sfc-status{display:inline-flex;align-items:center;gap:7px;font-weight:600}
+.sfc-dot{width:10px;height:10px;border-radius:50%;display:inline-block;background:#999}
+.sfc-dot.run{background:#43a047}.sfc-dot.stop{background:#d84315}
+.sfc-card{border:1px solid #c8c8c8;border-radius:5px;padding:16px;margin:0 0 16px;background:rgba(255,255,255,.03)}
+.sfc-card-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.sfc-card-head input[type=text]{font-size:1.05rem;font-weight:600;min-width:220px;flex:1 1 260px}
+.sfc-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 20px}
+.sfc-field label{display:block;font-weight:600;margin:0 0 4px}.sfc-field small{display:block;color:#777;margin-top:4px}
+.sfc-field input[type=text],.sfc-field input[type=number],.sfc-field select{width:100%;min-height:34px}
+.sfc-sensors{border:1px solid #ccc;border-radius:4px;max-height:210px;overflow:auto;padding:6px 10px}
+.sfc-sensor-row{display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px dotted #ddd}.sfc-sensor-row:last-child{border-bottom:0}
+.sfc-sensor-row span{flex:1}.sfc-sensor-temp{font-family:monospace;color:#666;white-space:nowrap}
+.sfc-curve{width:100%;border-collapse:collapse}.sfc-curve th,.sfc-curve td{text-align:left;padding:5px 6px;border-bottom:1px solid #ddd}.sfc-curve input{width:100%;min-width:80px}
+.sfc-curve-actions{margin-top:7px}.sfc-mini-btn{padding:4px 9px!important;min-height:28px!important}
+.sfc-live{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:10px 0 14px}
+.sfc-live>div{border:1px solid #ddd;border-radius:4px;padding:8px;text-align:center}.sfc-live b{display:block;font-size:1.15rem;margin-top:3px}
+.sfc-message{padding:10px 12px;border-radius:4px;margin:10px 0;display:none}.sfc-message.ok{display:block;background:rgba(67,160,71,.14);border:1px solid #43a047}.sfc-message.err{display:block;background:rgba(216,67,21,.12);border:1px solid #d84315}
+.sfc-warning{border-left:4px solid #f0a000;padding:8px 12px;margin:12px 0;background:rgba(240,160,0,.08)}
+.sfc-empty{padding:28px;text-align:center;color:#777;border:1px dashed #bbb;border-radius:5px}
+.sfc-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sfc-danger{color:#b71c1c}
+@media(max-width:760px){.sfc-grid{grid-template-columns:1fr}.sfc-live{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+
+<div id="sfc-root">
+  <div class="sfc-warning">
+    <b>安全提示：</b>此插件会直接写入 Linux hwmon PWM 控制接口。建议 CPU 风扇继续交给 BIOS；GPU/机箱风扇首次启用时请现场观察转速和温度。温度源失联、达到临界温度或检测到停转时会按 Fail-safe 设置提升风扇转速。
+  </div>
+
+  <div class="sfc-toolbar">
+    <label><input type="checkbox" id="sfc-global-enabled"> <b>启用 Smart Fan Control</b></label>
+    <label>刷新间隔 <input type="number" id="sfc-interval" min="2" max="60" value="5" style="width:68px"> 秒</label>
+    <span class="grow"></span>
+    <span class="sfc-status"><span id="sfc-dot" class="sfc-dot stop"></span><span id="sfc-service-text">正在读取状态…</span></span>
+  </div>
+
+  <div class="sfc-toolbar">
+    <input type="button" id="sfc-scan" value="重新扫描硬件">
+    <input type="button" id="sfc-add" value="+ 添加控制器">
+    <span class="grow"></span>
+    <input type="button" id="sfc-save" value="应用并保存">
+  </div>
+
+  <div id="sfc-message" class="sfc-message"></div>
+  <div id="sfc-cards"></div>
+</div>
+
+<script>
+(function(){
+'use strict';
+const root=document.getElementById('sfc-root');
+if(root.dataset.init==='1') return; root.dataset.init='1';
+const csrf=<?=json_encode((string)$csrf)?>;
+const api='/plugins/smartfancontrol/api.php';
+let hw={pwms:[],fans:[],temps:[],gpus:[]};
+let cfg={version:1,enabled:false,interval:5,profiles:[]};
+let lastStatus={};
+let pollTimer=null;
+
+const $=s=>root.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=> 'fan_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7);
+function msg(text,ok=true){const el=$('#sfc-message');el.className='sfc-message '+(ok?'ok':'err');el.textContent=text;clearTimeout(el._t);el._t=setTimeout(()=>{el.className='sfc-message';},6000)}
+function post(action,extra={}){const fd=new URLSearchParams();fd.set('action',action);fd.set('csrf_token',csrf);Object.entries(extra).forEach(([k,v])=>fd.set(k,v));return fetch(api,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:fd.toString(),cache:'no-store'}).then(async r=>{const d=await r.json().catch(()=>({ok:false,error:'Invalid API response'}));if(!r.ok||d.ok===false)throw new Error(d.error||('HTTP '+r.status));return d;});}
+function selectorId(o,kind){if(!o)return'';return 'hwmon|'+(o.chip||'')+'|'+(o.device||'')+'|'+(o.channel||'');}
+function sensorId(s){if(!s)return'';if(s.type==='nvidia')return'nvidia|'+s.uuid;if(s.type==='array_max')return'array|max';if(s.type==='hwmon')return'hwtemp|'+(s.chip||'')+'|'+(s.device||'')+'|'+(s.input||'');return'';}
+function allSensors(){return [...(hw.gpus||[]),...(hw.temps||[])];}
+function findPwm(id){return (hw.pwms||[]).find(x=>x.id===id)}
+function findFan(id){return (hw.fans||[]).find(x=>x.id===id)}
+function findSensor(id){return allSensors().find(x=>x.id===id)}
+function defaultProfile(){return {id:uid(),name:'新风扇控制器',enabled:true,pwm:null,rpm:null,sensor_mode:'max',sensors:[],curve:[{temp:45,pwm:40},{temp:55,pwm:50},{temp:65,pwm:70},{temp:75,pwm:100}],critical_temp:80,failsafe_pwm:100,min_pwm:30,min_rpm:0,rpm_guard_pwm:35};}
+function optionHtml(items,selected,placeholder){let out='<option value="">'+esc(placeholder)+'</option>';items.forEach(x=>{out+='<option value="'+esc(x.id)+'" '+(x.id===selected?'selected':'')+'>'+esc(x.label)+(x.rpm!=null?' — '+x.rpm+' RPM':'')+'</option>'});if(selected&&!items.some(x=>x.id===selected))out+='<option selected value="'+esc(selected)+'">已保存（当前未检测到）</option>';return out;}
+function sensorRows(profile){const selected=new Set((profile.sensors||[]).map(sensorId));const catalog=allSensors().slice();(profile.sensors||[]).forEach(s=>{const id=sensorId(s);if(id&&!catalog.some(x=>x.id===id))catalog.push({...s,id,label:(s.label||id)+'（当前不可用）',temp:null});});if(!catalog.length)return'<div style="padding:8px;color:#777">未检测到可用温度传感器</div>';return catalog.map(s=>'<label class="sfc-sensor-row"><input type="checkbox" class="sensor-check" value="'+esc(s.id)+'" '+(selected.has(s.id)?'checked':'')+'><span>'+esc(s.label)+'</span><span class="sfc-sensor-temp">'+(s.temp==null?'--':esc(s.temp)+' °C')+'</span></label>').join('');}
+function curveRows(curve){return (curve||[]).map((pt,i)=>'<tr><td><input class="curve-temp" type="number" step="1" value="'+esc(pt.temp)+'"></td><td><input class="curve-pwm" type="number" min="0" max="100" step="1" value="'+esc(pt.pwm)+'"></td><td><button type="button" class="sfc-mini-btn curve-del" data-i="'+i+'">删除</button></td></tr>').join('');}
+function profileStatus(id){return (lastStatus.profiles||{})[id]||{};}
+function render(){
+  $('#sfc-global-enabled').checked=!!cfg.enabled;$('#sfc-interval').value=cfg.interval||5;
+  const cards=$('#sfc-cards');
+  if(!cfg.profiles.length){cards.innerHTML='<div class="sfc-empty">还没有控制器。点击“+ 添加控制器”，例如创建 <b>Tesla P4 → nct6793 pwm5</b>。</div>';return;}
+  cards.innerHTML=cfg.profiles.map((p,idx)=>{const st=profileStatus(p.id);const pwmSel=selectorId(p.pwm,'pwm'),rpmSel=selectorId(p.rpm,'fan');return `
+  <section class="sfc-card" data-id="${esc(p.id)}">
+    <div class="sfc-card-head">
+      <label><input type="checkbox" class="profile-enabled" ${p.enabled?'checked':''}> 启用</label>
+      <input type="text" class="profile-name" value="${esc(p.name)}" aria-label="控制器名称">
+      <button type="button" class="profile-remove sfc-danger">删除控制器</button>
+    </div>
+    <div class="sfc-live">
+      <div>温度<b class="live-temp">${st.temperature==null?'--':esc(st.temperature)+' °C'}</b></div>
+      <div>PWM<b class="live-pwm">${st.applied_pwm==null?'--':esc(st.applied_pwm)+'%'}</b></div>
+      <div>转速<b class="live-rpm">${st.rpm==null?'--':esc(st.rpm)+' RPM'}</b></div>
+      <div>状态<b class="live-state">${esc(st.reason||st.state||'--')}</b></div>
+    </div>
+    <div class="sfc-grid">
+      <div class="sfc-field"><label>PWM 控制器</label><select class="pwm-select">${optionHtml(hw.pwms||[],pwmSel,'请选择 PWM')}</select><small>保存芯片名+设备路径+通道，不依赖 hwmonX 编号。</small></div>
+      <div class="sfc-field"><label>RPM 传感器</label><select class="rpm-select">${optionHtml(hw.fans||[],rpmSel,'可不选择')}</select><small>用于转速显示和停转保护。</small></div>
+      <div class="sfc-field" style="grid-column:1/-1"><label>温度传感器（可多选）</label><div class="sfc-sensors">${sensorRows(p)}</div></div>
+      <div class="sfc-field"><label>多传感器计算</label><select class="sensor-mode"><option value="max" ${p.sensor_mode!=='avg'?'selected':''}>取最高温度</option><option value="avg" ${p.sensor_mode==='avg'?'selected':''}>取平均温度</option></select></div>
+      <div class="sfc-field"><label>最低 PWM (%)</label><input class="min-pwm" type="number" min="0" max="100" value="${esc(p.min_pwm??30)}"><small>曲线要求非零转速时不会低于此值。</small></div>
+      <div class="sfc-field" style="grid-column:1/-1"><label>风扇曲线</label><table class="sfc-curve"><thead><tr><th>温度 °C</th><th>PWM %</th><th></th></tr></thead><tbody>${curveRows(p.curve)}</tbody></table><div class="sfc-curve-actions"><button type="button" class="curve-add sfc-mini-btn">+ 曲线节点</button></div></div>
+      <div class="sfc-field"><label>临界温度 °C</label><input class="critical-temp" type="number" min="20" max="150" value="${esc(p.critical_temp??80)}"><small>达到后强制 100% PWM。</small></div>
+      <div class="sfc-field"><label>传感器失联 Fail-safe (%)</label><input class="failsafe-pwm" type="number" min="20" max="100" value="${esc(p.failsafe_pwm??100)}"><small>建议保持 100%。</small></div>
+      <div class="sfc-field"><label>最低安全 RPM</label><input class="min-rpm" type="number" min="0" max="30000" value="${esc(p.min_rpm??0)}"><small>0=关闭停转保护；建议确认风扇最低稳定转速后填写。</small></div>
+      <div class="sfc-field"><label>RPM 检测起始 PWM (%)</label><input class="rpm-guard-pwm" type="number" min="0" max="100" value="${esc(p.rpm_guard_pwm??35)}"><small>高于此 PWM 且连续 3 次低于最低 RPM，会强制 100%。</small></div>
+    </div>
+  </section>`}).join('');
+  bindCards();
+}
+function bindCards(){root.querySelectorAll('.sfc-card').forEach(card=>{
+  card.querySelector('.profile-remove').addEventListener('click',()=>{const id=card.dataset.id;if(confirm('删除这个控制器？删除并保存后会恢复该 PWM 原来的控制模式。')){syncFromDom();cfg.profiles=cfg.profiles.filter(x=>x.id!==id);render();}});
+  card.querySelector('.curve-add').addEventListener('click',()=>{syncFromDom();const p=cfg.profiles.find(x=>x.id===card.dataset.id);p.curve.push({temp:(p.curve.at(-1)?.temp??60)+5,pwm:Math.min(100,(p.curve.at(-1)?.pwm??70)+10)});render();});
+  card.querySelectorAll('.curve-del').forEach(btn=>btn.addEventListener('click',()=>{syncFromDom();const p=cfg.profiles.find(x=>x.id===card.dataset.id);if(p.curve.length<=2){msg('至少保留 2 个曲线节点。',false);return;}p.curve.splice(Number(btn.dataset.i),1);render();}));
+ });}
+function syncFromDom(){
+  cfg.enabled=$('#sfc-global-enabled').checked;cfg.interval=Math.max(2,Math.min(60,Number($('#sfc-interval').value)||5));
+  root.querySelectorAll('.sfc-card').forEach(card=>{const p=cfg.profiles.find(x=>x.id===card.dataset.id);if(!p)return;p.enabled=card.querySelector('.profile-enabled').checked;p.name=card.querySelector('.profile-name').value.trim()||'Fan';
+    const pwm=findPwm(card.querySelector('.pwm-select').value);if(pwm)p.pwm={chip:pwm.chip,device:pwm.device,channel:pwm.channel};
+    const rpm=findFan(card.querySelector('.rpm-select').value);p.rpm=rpm?{chip:rpm.chip,device:rpm.device,channel:rpm.channel}:null;
+    p.sensor_mode=card.querySelector('.sensor-mode').value==='avg'?'avg':'max';p.sensors=[];card.querySelectorAll('.sensor-check:checked').forEach(ch=>{const s=findSensor(ch.value);if(!s)return;if(s.type==='nvidia')p.sensors.push({type:'nvidia',uuid:s.uuid,label:s.label});else if(s.type==='array_max')p.sensors.push({type:'array_max',label:s.label});else if(s.type==='hwmon')p.sensors.push({type:'hwmon',chip:s.chip,device:s.device,input:s.input,label:s.label});});
+    p.min_pwm=Number(card.querySelector('.min-pwm').value)||0;p.critical_temp=Number(card.querySelector('.critical-temp').value)||80;p.failsafe_pwm=Number(card.querySelector('.failsafe-pwm').value)||100;p.min_rpm=Number(card.querySelector('.min-rpm').value)||0;p.rpm_guard_pwm=Number(card.querySelector('.rpm-guard-pwm').value)||35;
+    p.curve=[...card.querySelectorAll('.sfc-curve tbody tr')].map(tr=>({temp:Number(tr.querySelector('.curve-temp').value),pwm:Number(tr.querySelector('.curve-pwm').value)})).filter(x=>Number.isFinite(x.temp)&&Number.isFinite(x.pwm)).sort((a,b)=>a.temp-b.temp);
+  });
+}
+async function scan(show=true){try{syncFromDom();const d=await post('scan');hw=d.hardware||hw;if(d.config&&cfg.profiles.length===0)cfg=d.config;render();if(show)msg(`扫描完成：${hw.pwms.length} 个 PWM，${hw.fans.length} 个 RPM，${allSensors().length} 个温度源。`);}catch(e){msg('扫描失败：'+e.message,false)}}
+async function save(){try{syncFromDom();for(const p of cfg.profiles){if(p.enabled&&!p.pwm)throw new Error(`${p.name} 未选择 PWM 控制器`);if(p.enabled&&!p.sensors.length)throw new Error(`${p.name} 未选择温度传感器`);if(p.enabled&&p.curve.length<2)throw new Error(`${p.name} 至少需要 2 个曲线节点`);}const d=await post('save',{payload:JSON.stringify(cfg)});cfg=d.config||cfg;msg(cfg.enabled?'配置已保存，控制服务已重新启动。':'配置已保存，控制服务已停止并恢复 PWM 原控制模式。');await refreshStatus();}catch(e){msg('保存失败：'+e.message,false)}}
+async function refreshStatus(){try{const d=await post('status');lastStatus=d.status||{};const running=!!d.running;$('#sfc-dot').className='sfc-dot '+(running?'run':'stop');$('#sfc-service-text').textContent=running?'服务运行中':'服务未运行';root.querySelectorAll('.sfc-card').forEach(card=>{const st=(lastStatus.profiles||{})[card.dataset.id];if(!st)return;card.querySelector('.live-temp').textContent=st.temperature==null?'--':st.temperature+' °C';card.querySelector('.live-pwm').textContent=st.applied_pwm==null?'--':st.applied_pwm+'%';card.querySelector('.live-rpm').textContent=st.rpm==null?'--':st.rpm+' RPM';card.querySelector('.live-state').textContent=st.reason||st.state||'--';});}catch(e){$('#sfc-dot').className='sfc-dot stop';$('#sfc-service-text').textContent='状态读取失败';}}
+$('#sfc-add').addEventListener('click',()=>{syncFromDom();cfg.profiles.push(defaultProfile());render();});
+$('#sfc-scan').addEventListener('click',()=>scan(true));
+$('#sfc-save').addEventListener('click',save);
+async function init(){try{const d=await post('scan');hw=d.hardware||hw;cfg=d.config||cfg;render();await refreshStatus();}catch(e){render();msg('初始化失败：'+e.message,false);}pollTimer=setInterval(refreshStatus,5000);}
+init();
+})();
+</script>
+
