@@ -2,6 +2,28 @@ Menu="Dashboard"
 Type="xmenu"
 Markdown="false"
 ---
+<style>
+tbody[data-sfc-fan-layout="1"] .sfc-dashboard-fan-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  column-gap:0;
+  row-gap:12px;
+  width:100%;
+}
+tbody[data-sfc-fan-layout="1"] .sfc-dashboard-fan-item{
+  display:block;
+  min-width:0;
+}
+tbody[data-sfc-fan-layout="1"] .sfc-dashboard-fan-item>span{
+  display:block!important;
+  width:auto!important;
+  float:none!important;
+  margin:0!important;
+}
+@media(max-width:520px){
+  tbody[data-sfc-fan-layout="1"] .sfc-dashboard-fan-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+</style>
 <script>
 (function(){
 'use strict';
@@ -59,9 +81,67 @@ function setVisible(el,visible){
     el.dataset.sfcHidden='1';el.style.display='none';
   }
 }
+function updateDisplayedFanCount(root,count){
+  const rx=/((?:Fan count|风扇数)\s*[:：]\s*)\d+/i;
+  root.querySelectorAll('.tile-header span').forEach(el=>{
+    for(const node of el.childNodes){
+      if(node.nodeType!==Node.TEXT_NODE)continue;
+      const text=String(node.nodeValue||'');
+      if(rx.test(text))node.nodeValue=text.replace(rx,'$1'+count);
+    }
+  });
+}
+function compactFanLayout(root,pairs){
+  if(!pairs.length)return;
+  const first=pairs.find(p=>p.labelEl&&p.valueEl)||pairs[0];
+  const dataTd=(first.valueEl&&first.valueEl.closest('td'))||(first.labelEl&&first.labelEl.closest('td'));
+  if(!dataTd)return;
+
+  let grid=dataTd.querySelector(':scope > .sfc-dashboard-fan-grid');
+  if(!grid){
+    grid=document.createElement('div');
+    grid.className='sfc-dashboard-fan-grid';
+    dataTd.appendChild(grid);
+  }
+
+  const validKeys=new Set();
+  const sorted=[...pairs].sort((a,b)=>(fanNumberFromKey(a.key)||0)-(fanNumberFromKey(b.key)||0));
+  for(const pair of sorted){
+    validKeys.add(pair.key);
+    let item=grid.querySelector('.sfc-dashboard-fan-item[data-key="'+pair.key+'"]');
+    if(!item){
+      item=document.createElement('span');
+      item.className='sfc-dashboard-fan-item';
+      item.dataset.key=pair.key;
+      grid.appendChild(item);
+    }
+    // Move the native nodes instead of cloning them so Unraid's live #fanN updates keep working.
+    if(pair.labelEl&&pair.labelEl.parentNode!==item)item.appendChild(pair.labelEl);
+    if(pair.valueEl&&pair.valueEl.parentNode!==item)item.appendChild(pair.valueEl);
+    // Visibility belongs to the grid item so hidden fans no longer reserve a layout slot.
+    setVisible(pair.labelEl,true);
+    setVisible(pair.valueEl,true);
+    setVisible(item,pair.visible);
+  }
+
+  grid.querySelectorAll('.sfc-dashboard-fan-item').forEach(item=>{
+    if(!validKeys.has(item.dataset.key||''))item.remove();
+  });
+
+  // Unraid 7.3.x pre-groups the original fan count with literal <br> separators.
+  // After moving the live nodes into our compact grid those separators are obsolete.
+  for(const node of [...dataTd.childNodes]){
+    if(node===grid)continue;
+    if(node.nodeType===Node.ELEMENT_NODE&&node.tagName==='BR')node.remove();
+    else if(node.nodeType===Node.TEXT_NODE&&!String(node.nodeValue||'').trim())node.remove();
+  }
+  root.dataset.sfcFanLayout='1';
+  updateDisplayedFanCount(root,sorted.filter(p=>p.visible).length);
+}
 function processDashboard(){
   scheduled=false;
   for(const root of fanRoots()){
+    const pairs=[];
     for(const labelEl of candidateLabels(root)){
       let key=labelEl.dataset.sfcFanKey||fanKeyFromText(labelEl.textContent);
       if(!key)continue;
@@ -76,12 +156,9 @@ function processDashboard(){
       const domRpm=valueEl?rpmFromText(valueEl.textContent):null;
       const rpm=Number.isFinite(apiRpm)?apiRpm:domRpm;
       const visible=!(settings.hide_zero_rpm&&rpm!==null&&rpm<=0);
-
-      // Hide the individual label/value spans.  In Unraid 7.3.x all fan labels and
-      // RPM values share one <td>, so hiding the closest <td> cannot work here.
-      setVisible(labelEl,visible);
-      setVisible(valueEl,visible);
+      pairs.push({key,labelEl,valueEl,rpm,visible});
     }
+    compactFanLayout(root,pairs);
   }
 }
 function schedule(){if(scheduled)return;scheduled=true;requestAnimationFrame(processDashboard);}

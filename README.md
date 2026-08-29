@@ -93,7 +93,7 @@ On upgrades, Smart Fan Control can import an existing Dynamix System Temperature
 
 ## Versioning
 
-Public releases use the Unraid/LimeTech-style `YYYY.MM.DD` version format. If multiple releases are published on the same day, append a letter such as `2026.08.29a`. The previous development line ended at `0.1.8`; `2026.08.29` is the first Community Applications submission candidate; `2026.08.29a` adds Dashboard fan filtering and custom remarks; `2026.08.29b` fixes zero-RPM filtering for the native Unraid 7.3.x fan tile markup.
+Public releases use the Unraid/LimeTech-style `YYYY.MM.DD` version format. If multiple releases are published on the same day, append a letter such as `2026.08.29a`. The previous development line ended at `0.1.8`; `2026.08.29` is the first Community Applications submission candidate; `2026.08.29a` adds Dashboard fan filtering and custom remarks; `2026.08.29b` fixes zero-RPM filtering for the native Unraid 7.3.x fan tile markup; `2026.08.29c` compacts the remaining visible fans into a gap-free three-column Dashboard layout.
 
 ## Diagnostics
 

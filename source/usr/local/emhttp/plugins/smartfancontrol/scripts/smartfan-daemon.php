@@ -10,7 +10,7 @@
 
 declare(strict_types=1);
 
-const SFC_VERSION = '2026.08.29';
+const SFC_VERSION = '2026.08.29c';
 
 function envp(string $name, string $default): string {
     $v = getenv($name);

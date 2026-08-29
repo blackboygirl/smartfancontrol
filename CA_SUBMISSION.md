@@ -1,6 +1,6 @@
 # Community Applications submission checklist
 
-Current release: **2026.08.29b**
+Current release: **2026.08.29c**
 
 This repository follows the current Unraid Community Apps starter layout for plugins.
 
@@ -45,4 +45,4 @@ https://raw.githubusercontent.com/blackboygirl/smartfancontrol/main/smartfancont
 
 ## Versioning
 
-Starting with this Community Apps candidate, public releases use `YYYY.MM.DD`. If more than one release is published on the same day, append a letter, for example `2026.08.29a`, then `2026.08.29b`.
+Starting with this Community Apps candidate, public releases use `YYYY.MM.DD`. If more than one release is published on the same day, append a letter, for example `2026.08.29a`, then `2026.08.29b`, then `2026.08.29c`.

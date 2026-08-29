@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.08.29c
+- Compact the native Unraid Dashboard fan tile after zero-RPM filtering so hidden channels no longer leave empty row/column slots.
+- Reflow visible fans into a three-column grid while moving (not cloning) Unraid's native `#fan0..#fanN-1` RPM nodes, preserving live RPM updates.
+- Update the Dashboard fan-count display to reflect the number of currently visible fans when the zero-RPM filter is enabled.
+- Preserve custom fan remarks, dynamic hide/show behavior, PWM control, and RPM fail-safe logic.
+
 ## 2026.08.29b
 - Fix **Only show fans with RPM > 0** on the native Unraid 7.3.x Dashboard Fan Information tile.
 - Match Unraid's actual Dashboard DOM (`FAN 1..N` labels paired with live `#fan0..#fanN-1` RPM spans) instead of treating the whole shared table cell as one fan.
