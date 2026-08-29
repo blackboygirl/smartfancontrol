@@ -2,7 +2,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name "smartfancontrol">
 <!ENTITY author "blackboygirl">
-<!ENTITY version "2026.08.29a">
+<!ENTITY version "2026.08.29b">
 <!ENTITY launch "Settings/SmartFanControl">
 <!ENTITY github "blackboygirl/smartfancontrol">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/blackboygirl/smartfancontrol/main/smartfancontrol.plg">
@@ -11,6 +11,12 @@
 <CHANGES>
 <![CDATA[
 # Changelog
+
+## 2026.08.29b
+- Fix **Only show fans with RPM > 0** on the native Unraid 7.3.x Dashboard Fan Information tile.
+- Match Unraid's actual Dashboard DOM (`FAN 1..N` labels paired with live `#fan0..#fanN-1` RPM spans) instead of treating the whole shared table cell as one fan.
+- Use live hwmon RPM values returned by Smart Fan Control as the primary visibility source, with the native Dashboard RPM text as a fallback.
+- Preserve per-fan remarks and dynamic reappearance when a previously stopped fan starts spinning again.
 
 ## 2026.08.29a
 - Add Dashboard fan-display customization for Unraid's native **Fan Information** tile.
@@ -337,6 +343,7 @@ window.__smartFanControlDashboardEnhancer=true;
 
 const api='/plugins/smartfancontrol/api.php?action=fan_display_info';
 let settings={hide_zero_rpm:true,remarks:{}};
+let liveRpm={};
 let scheduled=false;
 
 function fanKeyFromText(text){
@@ -347,6 +354,10 @@ function fanKeyFromText(text){
 }
 function rpmFromText(text){
   const m=String(text||'').match(/(-?\d+(?:\.\d+)?)\s*RPM/i);
+  return m?Number(m[1]):null;
+}
+function fanNumberFromKey(key){
+  const m=String(key||'').match(/^fan(\d+)$/i);
   return m?Number(m[1]):null;
 }
 function fanRoots(){
@@ -364,15 +375,11 @@ function candidateLabels(root){
   root.querySelectorAll('td').forEach(el=>{if(el.dataset.sfcFanKey||fanKeyFromText(el.textContent))out.push(el);});
   return out;
 }
-function resolveFanCells(labelEl){
-  const labelCell=labelEl.closest('td')||labelEl;
-  let rpmCell=labelCell;
-  let rpm=rpmFromText(labelCell.textContent);
-  if(rpm===null&&labelCell.nextElementSibling){
-    const nextRpm=rpmFromText(labelCell.nextElementSibling.textContent);
-    if(nextRpm!==null){rpm=nextRpm;rpmCell=labelCell.nextElementSibling;}
-  }
-  return {labelCell,rpmCell,rpm};
+function nativeValueForKey(root,key){
+  // Unraid 7.x labels FAN 1..N, while the live RPM spans are #fan0..#fanN-1.
+  const n=fanNumberFromKey(key);
+  if(n===null||n<1)return null;
+  return root.querySelector('#fan'+(n-1));
 }
 function setVisible(el,visible){
   if(!el)return;
@@ -397,10 +404,16 @@ function processDashboard(){
       const desired=remark||labelEl.dataset.sfcOriginalLabel;
       if(labelEl.textContent!==desired)labelEl.textContent=desired;
 
-      const {labelCell,rpmCell,rpm}=resolveFanCells(labelEl);
+      const valueEl=nativeValueForKey(root,key);
+      const apiRpm=Object.prototype.hasOwnProperty.call(liveRpm,key)?liveRpm[key]:null;
+      const domRpm=valueEl?rpmFromText(valueEl.textContent):null;
+      const rpm=Number.isFinite(apiRpm)?apiRpm:domRpm;
       const visible=!(settings.hide_zero_rpm&&rpm!==null&&rpm<=0);
-      setVisible(labelCell,visible);
-      if(rpmCell!==labelCell)setVisible(rpmCell,visible);
+
+      // Hide the individual label/value spans.  In Unraid 7.3.x all fan labels and
+      // RPM values share one <td>, so hiding the closest <td> cannot work here.
+      setVisible(labelEl,visible);
+      setVisible(valueEl,visible);
     }
   }
 }
@@ -410,7 +423,17 @@ async function refreshSettings(){
     const r=await fetch(api,{cache:'no-store',credentials:'same-origin'});
     if(!r.ok)return;
     const d=await r.json();
-    if(d&&d.ok!==false&&d.fan_display&&d.fan_display.config){settings=d.fan_display.config;schedule();}
+    if(d&&d.ok!==false&&d.fan_display){
+      if(d.fan_display.config)settings=d.fan_display.config;
+      const next={};
+      for(const fan of (d.fan_display.fans||[])){
+        const key=String(fan&&fan.key||'').toLowerCase();
+        const rpm=Number(fan&&fan.rpm);
+        if(/^fan\d+$/.test(key)&&Number.isFinite(rpm))next[key]=rpm;
+      }
+      liveRpm=next;
+      schedule();
+    }
   }catch(_e){}
 }
 
@@ -432,7 +455,7 @@ declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-const SFC_VERSION = '2026.08.29a';
+const SFC_VERSION = '2026.08.29b';
 const SFC_CONFIG = '/boot/config/plugins/smartfancontrol/config.json';
 const SFC_RUN = '/run/smartfancontrol';
 const SFC_STATUS = SFC_RUN . '/status.json';
@@ -980,7 +1003,7 @@ switch ($action) {
 
 declare(strict_types=1);
 
-const SFC_VERSION = '2026.08.29a';
+const SFC_VERSION = '2026.08.29b';
 
 function envp(string $name, string $default): string {
     $v = getenv($name);
@@ -1822,10 +1845,10 @@ fi
 chmod 0644 "$DRIVERS"
 
 /etc/rc.d/rc.smartfancontrol start >/dev/null 2>&1 || true
-logger -t smartfancontrol "Smart Fan Control 2026.08.29a installed"
+logger -t smartfancontrol "Smart Fan Control 2026.08.29b installed"
 echo ""
 echo "-----------------------------------------------------------"
-echo " Smart Fan Control 2026.08.29a installed"
+echo " Smart Fan Control 2026.08.29b installed"
 echo " Sensor driver config: $DRIVERS"
 echo " Open Settings -> User Utilities -> Smart Fan Control to configure it."
 echo "-----------------------------------------------------------"

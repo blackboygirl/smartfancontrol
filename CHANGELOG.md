@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.08.29b
+- Fix **Only show fans with RPM > 0** on the native Unraid 7.3.x Dashboard Fan Information tile.
+- Match Unraid's actual Dashboard DOM (`FAN 1..N` labels paired with live `#fan0..#fanN-1` RPM spans) instead of treating the whole shared table cell as one fan.
+- Use live hwmon RPM values returned by Smart Fan Control as the primary visibility source, with the native Dashboard RPM text as a fallback.
+- Preserve per-fan remarks and dynamic reappearance when a previously stopped fan starts spinning again.
+
 ## 2026.08.29a
 - Add Dashboard fan-display customization for Unraid's native **Fan Information** tile.
 - Add **Only show fans with RPM > 0** filtering; zero-RPM channels are hidden dynamically without affecting PWM control or stall protection.
