@@ -40,6 +40,10 @@ if ($csrf === '') {
 .sfc-driver-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}.sfc-driver-head .grow{flex:1}
 .sfc-driver-card textarea{width:100%;min-height:76px;font-family:monospace;resize:vertical}
 .sfc-driver-status{margin-top:10px;color:#666}.sfc-driver-row{display:inline-block;margin:3px 12px 3px 0}.sfc-driver-ok{color:#43a047}.sfc-driver-warn{color:#d98200}
+.sfc-display-card{border:1px solid #c8c8c8;border-radius:5px;padding:14px 16px;margin:12px 0 18px;background:rgba(255,255,255,.03)}
+.sfc-display-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}.sfc-display-head .grow{flex:1}
+.sfc-fan-table{width:100%;border-collapse:collapse;margin-top:10px}.sfc-fan-table th,.sfc-fan-table td{text-align:left;padding:7px 8px;border-bottom:1px solid #ddd;vertical-align:middle}
+.sfc-fan-table input[type=text]{width:100%;min-height:32px}.sfc-fan-zero{opacity:.58}.sfc-fan-rpm{font-family:monospace;white-space:nowrap}.sfc-fan-source{white-space:nowrap}
 @media(max-width:760px){.sfc-grid{grid-template-columns:1fr}.sfc-live{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 
@@ -65,6 +69,19 @@ if ($csrf === '') {
       <input type="button" id="sfc-driver-refresh" value="刷新驱动状态">
     </div>
     <div id="sfc-driver-status" class="sfc-driver-status"></div>
+  </div>
+
+  <div class="sfc-display-card">
+    <div class="sfc-display-head">
+      <b>仪表板风扇显示</b>
+      <span class="grow"></span>
+      <label><input type="checkbox" id="sfc-hide-zero-rpm" checked> 只显示有转速的风扇（RPM &gt; 0）</label>
+    </div>
+    <small>这里只影响 Unraid 仪表板里的“风扇信息”显示，不影响 PWM 控制和停转保护。可以给 FAN 1 / FAN 2 等通道填写自定义备注。</small>
+    <div id="sfc-fan-display-list"></div>
+    <div class="sfc-actions" style="margin-top:10px">
+      <input type="button" id="sfc-fan-display-save" value="保存风扇显示设置">
+    </div>
   </div>
 
   <div class="sfc-toolbar">
@@ -96,6 +113,7 @@ let hw={pwms:[],fans:[],temps:[],gpus:[]};
 let cfg={version:1,enabled:false,interval:5,profiles:[]};
 let lastStatus={};
 let driverInfo={modules:[],status:[],detect_available:false,sensors_detect:'',perl:''};
+let fanDisplay={config:{version:1,hide_zero_rpm:true,remarks:{}},fans:[]};
 let pollTimer=null;
 
 const $=s=>root.querySelector(s);
@@ -132,7 +150,21 @@ function renderDriverInfo(info,writeEditor=false){
 }
 async function refreshDrivers(writeEditor=true){try{const d=await post('driver_info');renderDriverInfo(d.drivers||{},writeEditor);}catch(e){msg('读取驱动状态失败：'+e.message,false)}}
 async function detectDrivers(){const btn=$('#sfc-driver-detect');try{btn.disabled=true;btn.value='正在检测…';const d=await post('driver_detect');const mods=(d.detected?.modules||[]),sd=(d.detected?.sensors_detect_modules||[]),fb=(d.detected?.loaded_hwmon_modules||[]);$('#sfc-drivers').value=mods.join('\n');renderDriverInfo(d.drivers||{},false);let via=sd.length?'sensors-detect':'';if(fb.length)via+=(via?' + ':'')+'当前已加载 hwmon';msg('检测完成：'+mods.join(', ')+(via?'（'+via+'）':'')+'。确认后点击“保存并加载驱动”。');}catch(e){msg('驱动检测失败：'+e.message,false)}finally{btn.value='自动检测驱动';btn.disabled=!driverInfo.detect_available}}
-async function saveDrivers(){try{const text=$('#sfc-drivers').value;const d=await post('driver_save',{modules:text});driverInfo=d.drivers||driverInfo;if(d.hardware)hw=d.hardware;renderDriverInfo(driverInfo,true);render();msg('驱动已保存并加载，硬件已重新扫描。');}catch(e){msg('保存驱动失败：'+e.message,false)}}
+async function saveDrivers(){try{const text=$('#sfc-drivers').value;const d=await post('driver_save',{modules:text});driverInfo=d.drivers||driverInfo;if(d.hardware)hw=d.hardware;renderDriverInfo(driverInfo,true);render();await refreshFanDisplay(true);msg('驱动已保存并加载，硬件已重新扫描。');}catch(e){msg('保存驱动失败：'+e.message,false)}}
+function renderFanDisplay(info,writeEditor=true){
+  fanDisplay=info||fanDisplay||{config:{hide_zero_rpm:true,remarks:{}},fans:[]};
+  const cfgd=fanDisplay.config||{};
+  const hide=$('#sfc-hide-zero-rpm');if(hide)hide.checked=cfgd.hide_zero_rpm!==false;
+  const host=$('#sfc-fan-display-list');if(!host)return;
+  const fans=fanDisplay.fans||[];
+  if(!fans.length){host.innerHTML='<div class="sfc-empty" style="margin-top:10px;padding:16px">当前未检测到 RPM 风扇传感器。</div>';return;}
+  host.innerHTML='<table class="sfc-fan-table"><thead><tr><th>仪表板通道</th><th>硬件来源</th><th>当前转速</th><th>备注 / 显示名称</th></tr></thead><tbody>'+fans.map(f=>{
+    const key=String(f.key||'');const rpm=f.rpm==null?null:Number(f.rpm);const remark=(cfgd.remarks||{})[key]??f.remark??'';
+    return '<tr class="'+(rpm===0?'sfc-fan-zero':'')+'"><td><b>'+esc(key.toUpperCase().replace('FAN','FAN '))+'</b></td><td class="sfc-fan-source">'+esc((f.chip||'')+' - '+(f.channel||''))+'</td><td class="sfc-fan-rpm">'+(rpm==null?'--':esc(rpm)+' RPM')+'</td><td><input type="text" class="sfc-fan-remark" data-key="'+esc(key)+'" maxlength="80" value="'+esc(remark)+'" placeholder="例如：CPU 风扇 / P4 排风"></td></tr>';
+  }).join('')+'</tbody></table>';
+}
+async function refreshFanDisplay(writeEditor=true){try{const d=await post('fan_display_info');renderFanDisplay(d.fan_display||fanDisplay,writeEditor);}catch(e){msg('读取风扇显示设置失败：'+e.message,false)}}
+async function saveFanDisplay(){try{const remarks={};root.querySelectorAll('.sfc-fan-remark').forEach(el=>{const key=el.dataset.key||'';const value=el.value.trim();if(key&&value)remarks[key]=value;});const payload={hide_zero_rpm:$('#sfc-hide-zero-rpm').checked,remarks};const d=await post('fan_display_save',{payload:JSON.stringify(payload)});renderFanDisplay(d.fan_display||fanDisplay,true);msg('风扇显示设置已保存；仪表板会自动应用，已打开的仪表板最多等待几秒即可刷新。');}catch(e){msg('保存风扇显示设置失败：'+e.message,false)}}
 function profileStatus(id){return (lastStatus.profiles||{})[id]||{};}
 function render(){
   $('#sfc-global-enabled').checked=!!cfg.enabled;$('#sfc-interval').value=cfg.interval||5;
@@ -181,16 +213,17 @@ function syncFromDom(){
     p.curve=[...card.querySelectorAll('.sfc-curve tbody tr')].map(tr=>({temp:Number(tr.querySelector('.curve-temp').value),pwm:Number(tr.querySelector('.curve-pwm').value)})).filter(x=>Number.isFinite(x.temp)&&Number.isFinite(x.pwm)).sort((a,b)=>a.temp-b.temp);
   });
 }
-async function scan(show=true){try{syncFromDom();const d=await post('scan');hw=d.hardware||hw;if(d.config&&cfg.profiles.length===0)cfg=d.config;render();if(show)msg(`扫描完成：${hw.pwms.length} 个 PWM，${hw.fans.length} 个 RPM，${allSensors().length} 个温度源。`);}catch(e){msg('扫描失败：'+e.message,false)}}
+async function scan(show=true){try{syncFromDom();const d=await post('scan');hw=d.hardware||hw;if(d.config&&cfg.profiles.length===0)cfg=d.config;fanDisplay=d.fan_display||fanDisplay;renderFanDisplay(fanDisplay,true);render();if(show)msg(`扫描完成：${hw.pwms.length} 个 PWM，${hw.fans.length} 个 RPM，${allSensors().length} 个温度源。`);}catch(e){msg('扫描失败：'+e.message,false)}}
 async function save(){try{syncFromDom();for(const p of cfg.profiles){if(p.enabled&&!p.pwm)throw new Error(`${p.name} 未选择 PWM 控制器`);if(p.enabled&&!p.sensors.length)throw new Error(`${p.name} 未选择温度传感器`);if(p.enabled&&p.curve.length<2)throw new Error(`${p.name} 至少需要 2 个曲线节点`);}const d=await post('save',{payload:JSON.stringify(cfg)});cfg=d.config||cfg;msg(cfg.enabled?'配置已保存，控制服务已重新启动。':'配置已保存，控制服务已停止并恢复 PWM 原控制模式。');await refreshStatus();}catch(e){msg('保存失败：'+e.message,false)}}
 async function refreshStatus(){try{const d=await post('status');lastStatus=d.status||{};const running=!!d.running;$('#sfc-dot').className='sfc-dot '+(running?'run':'stop');$('#sfc-service-text').textContent=running?'服务运行中':'服务未运行';root.querySelectorAll('.sfc-card').forEach(card=>{const st=(lastStatus.profiles||{})[card.dataset.id];if(!st)return;card.querySelector('.live-temp').textContent=st.temperature==null?'--':st.temperature+' °C';card.querySelector('.live-pwm').textContent=st.applied_pwm==null?'--':st.applied_pwm+'%';card.querySelector('.live-rpm').textContent=st.rpm==null?'--':st.rpm+' RPM';card.querySelector('.live-state').textContent=st.reason||st.state||'--';});}catch(e){$('#sfc-dot').className='sfc-dot stop';$('#sfc-service-text').textContent='状态读取失败';}}
 $('#sfc-driver-detect').addEventListener('click',detectDrivers);
 $('#sfc-driver-save').addEventListener('click',saveDrivers);
 $('#sfc-driver-refresh').addEventListener('click',()=>refreshDrivers(true));
+$('#sfc-fan-display-save').addEventListener('click',saveFanDisplay);
 $('#sfc-add').addEventListener('click',()=>{syncFromDom();cfg.profiles.push(defaultProfile());render();});
 $('#sfc-scan').addEventListener('click',()=>scan(true));
 $('#sfc-save').addEventListener('click',save);
-async function init(){try{const d=await post('scan');hw=d.hardware||hw;cfg=d.config||cfg;driverInfo=d.drivers||driverInfo;renderDriverInfo(driverInfo,true);render();await refreshStatus();}catch(e){render();msg('初始化失败：'+e.message,false);}pollTimer=setInterval(refreshStatus,5000);}
+async function init(){try{const d=await post('scan');hw=d.hardware||hw;cfg=d.config||cfg;driverInfo=d.drivers||driverInfo;fanDisplay=d.fan_display||fanDisplay;renderDriverInfo(driverInfo,true);renderFanDisplay(fanDisplay,true);render();await refreshStatus();}catch(e){renderFanDisplay(fanDisplay,true);render();msg('初始化失败：'+e.message,false);}pollTimer=setInterval(refreshStatus,5000);}
 init();
 })();
 </script>

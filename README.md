@@ -17,10 +17,29 @@ Smart Fan Control is an Unraid plugin for controlling one or more Linux `hwmon` 
 - Persistent hwmon sensor-driver loading via `drivers.conf`
 - Independent **Auto Detect Drivers** workflow using local `sensors-detect --auto`
 - Driver status/validation in the Unraid WebGUI; Dynamix System Temperature is not required
+- Dashboard **Fan Information** cleanup: optionally hide zero-RPM channels
+- Per-channel Dashboard fan remarks/display names (for example `FAN 5` -> `Tesla P4 Fan`)
 
 ## Sensor driver discovery
 
 Smart Fan Control can detect hwmon driver modules with local `sensors-detect --auto`, persist one module per line in `/boot/config/plugins/smartfancontrol/drivers.conf`, and load them with `modprobe` on startup.
+
+
+## Dashboard fan display
+
+Under **Settings -> User Utilities -> Smart Fan Control -> Dashboard Fan Display**, the plugin lists detected `fanN_input` RPM channels and lets you:
+
+- enable **Only show fans with RPM > 0** for Unraid's native **Fan Information** Dashboard tile;
+- assign a custom remark/display name to each Dashboard channel, such as `CPU Fan`, `Case Intake`, or `Tesla P4 Fan`;
+- keep these display preferences separate from control logic, so hiding or renaming a Dashboard item never changes PWM output, RPM fail-safe checks, or controller mappings.
+
+Display preferences are stored in:
+
+```text
+/boot/config/plugins/smartfancontrol/fan-display.json
+```
+
+The Dashboard helper watches Unraid's native fan tile for live updates, so a fan that changes between 0 RPM and a positive speed is hidden/shown automatically when zero-RPM filtering is enabled.
 
 ## Safety
 
@@ -74,7 +93,7 @@ On upgrades, Smart Fan Control can import an existing Dynamix System Temperature
 
 ## Versioning
 
-Public releases use the Unraid/LimeTech-style `YYYY.MM.DD` version format. If multiple releases are published on the same day, append a letter such as `2026.08.29a`. The previous development line ended at `0.1.8`; `2026.08.29` is the first Community Applications submission candidate.
+Public releases use the Unraid/LimeTech-style `YYYY.MM.DD` version format. If multiple releases are published on the same day, append a letter such as `2026.08.29a`. The previous development line ended at `0.1.8`; `2026.08.29` is the first Community Applications submission candidate; `2026.08.29a` adds Dashboard fan filtering and custom remarks.
 
 ## Diagnostics
 

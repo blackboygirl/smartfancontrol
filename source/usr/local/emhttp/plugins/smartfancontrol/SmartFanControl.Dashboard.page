@@ -1,0 +1,96 @@
+Menu="Dashboard"
+Type="xmenu"
+Markdown="false"
+---
+<script>
+(function(){
+'use strict';
+if(window.__smartFanControlDashboardEnhancer) return;
+window.__smartFanControlDashboardEnhancer=true;
+
+const api='/plugins/smartfancontrol/api.php?action=fan_display_info';
+let settings={hide_zero_rpm:true,remarks:{}};
+let scheduled=false;
+
+function fanKeyFromText(text){
+  const t=String(text||'').trim();
+  let m=t.match(/^FAN\s*(\d+)$/i);
+  if(!m)m=t.match(/^风扇\s*(\d+)$/i);
+  return m?'fan'+Number(m[1]):'';
+}
+function rpmFromText(text){
+  const m=String(text||'').match(/(-?\d+(?:\.\d+)?)\s*RPM/i);
+  return m?Number(m[1]):null;
+}
+function fanRoots(){
+  const roots=new Set();
+  document.querySelectorAll("tbody[title='Fan Information'],tbody[title='风扇信息'],.fan_view").forEach(x=>roots.add(x));
+  // Newer themes/translations may keep the same markup but localize the title.
+  document.querySelectorAll('tbody[title]').forEach(x=>{if(/fan|风扇/i.test(x.getAttribute('title')||'')&&/rpm/i.test(x.textContent||''))roots.add(x);});
+  return [...roots];
+}
+function candidateLabels(root){
+  const out=[];
+  root.querySelectorAll('span').forEach(el=>{if(el.dataset.sfcFanKey||fanKeyFromText(el.textContent))out.push(el);});
+  if(out.length)return out;
+  // Compatibility with older fan_view markup where FAN N is a bare table cell.
+  root.querySelectorAll('td').forEach(el=>{if(el.dataset.sfcFanKey||fanKeyFromText(el.textContent))out.push(el);});
+  return out;
+}
+function resolveFanCells(labelEl){
+  const labelCell=labelEl.closest('td')||labelEl;
+  let rpmCell=labelCell;
+  let rpm=rpmFromText(labelCell.textContent);
+  if(rpm===null&&labelCell.nextElementSibling){
+    const nextRpm=rpmFromText(labelCell.nextElementSibling.textContent);
+    if(nextRpm!==null){rpm=nextRpm;rpmCell=labelCell.nextElementSibling;}
+  }
+  return {labelCell,rpmCell,rpm};
+}
+function setVisible(el,visible){
+  if(!el)return;
+  if(visible){
+    if(el.dataset.sfcOldDisplay!==undefined){el.style.display=el.dataset.sfcOldDisplay;delete el.dataset.sfcOldDisplay;}
+    else if(el.style.display==='none'&&el.dataset.sfcHidden==='1')el.style.display='';
+    delete el.dataset.sfcHidden;
+  }else{
+    if(el.dataset.sfcHidden!=='1')el.dataset.sfcOldDisplay=el.style.display||'';
+    el.dataset.sfcHidden='1';el.style.display='none';
+  }
+}
+function processDashboard(){
+  scheduled=false;
+  for(const root of fanRoots()){
+    for(const labelEl of candidateLabels(root)){
+      let key=labelEl.dataset.sfcFanKey||fanKeyFromText(labelEl.textContent);
+      if(!key)continue;
+      labelEl.dataset.sfcFanKey=key;
+      if(!labelEl.dataset.sfcOriginalLabel)labelEl.dataset.sfcOriginalLabel=String(labelEl.textContent||'').trim();
+      const remark=String((settings.remarks||{})[key]||'').trim();
+      const desired=remark||labelEl.dataset.sfcOriginalLabel;
+      if(labelEl.textContent!==desired)labelEl.textContent=desired;
+
+      const {labelCell,rpmCell,rpm}=resolveFanCells(labelEl);
+      const visible=!(settings.hide_zero_rpm&&rpm!==null&&rpm<=0);
+      setVisible(labelCell,visible);
+      if(rpmCell!==labelCell)setVisible(rpmCell,visible);
+    }
+  }
+}
+function schedule(){if(scheduled)return;scheduled=true;requestAnimationFrame(processDashboard);}
+async function refreshSettings(){
+  try{
+    const r=await fetch(api,{cache:'no-store',credentials:'same-origin'});
+    if(!r.ok)return;
+    const d=await r.json();
+    if(d&&d.ok!==false&&d.fan_display&&d.fan_display.config){settings=d.fan_display.config;schedule();}
+  }catch(_e){}
+}
+
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{refreshSettings();schedule();});
+else{refreshSettings();schedule();}
+new MutationObserver(schedule).observe(document.documentElement,{childList:true,subtree:true,characterData:true});
+setInterval(refreshSettings,5000);
+setInterval(schedule,2000);
+})();
+</script>

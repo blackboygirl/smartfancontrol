@@ -1,5 +1,5 @@
 <CommunityApplications>
-  <Profile>Smart Fan Control for Unraid provides multi-channel PWM fan control with selectable NVIDIA GPU, Linux hwmon, and array temperature sources. It includes independent sensor-driver discovery, RPM monitoring, configurable fan curves, and fail-safe protection. Project support and issue tracking are available on GitHub.</Profile>
+  <Profile>Smart Fan Control for Unraid provides multi-channel PWM fan control with selectable NVIDIA GPU, Linux hwmon, and array temperature sources. It includes independent sensor-driver discovery, RPM monitoring, configurable fan curves, fail-safe protection, and customizable Dashboard fan labels/zero-RPM filtering. Project support and issue tracking are available on GitHub.</Profile>
   <Icon>https://raw.githubusercontent.com/blackboygirl/smartfancontrol/main/icon.svg</Icon>
   <WebPage>https://github.com/blackboygirl/smartfancontrol</WebPage>
 </CommunityApplications>

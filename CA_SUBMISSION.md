@@ -1,5 +1,7 @@
 # Community Applications submission checklist
 
+Current release: **2026.08.29a**
+
 This repository follows the current Unraid Community Apps starter layout for plugins.
 
 ## Required repository files

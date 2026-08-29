@@ -12,6 +12,7 @@ const SFC_STATUS = SFC_RUN . '/status.json';
 const SFC_PID = SFC_RUN . '/smartfancontrol.pid';
 const SFC_RC = '/etc/rc.d/rc.smartfancontrol';
 const SFC_DRIVERS = '/boot/config/plugins/smartfancontrol/drivers.conf';
+const SFC_FAN_DISPLAY = '/boot/config/plugins/smartfancontrol/fan-display.json';
 
 function respond(array $data, int $status = 200): never {
     http_response_code($status);
@@ -43,6 +44,74 @@ function devicePath(string $hw): string {
     $p = @realpath($hw . '/device');
     if ($p === false) $p = @realpath($hw);
     return $p === false ? '' : $p;
+}
+
+function defaultFanDisplay(): array {
+    return [
+        'version' => 1,
+        'hide_zero_rpm' => true,
+        'remarks' => [],
+    ];
+}
+
+function fanDisplayKeyFromChannel(string $channel): ?string {
+    if (!preg_match('/^fan([0-9]+)_input$/', basename($channel), $m)) return null;
+    return 'fan' . (int)$m[1];
+}
+
+function sanitizeFanRemark(mixed $value): string {
+    $value = trim((string)$value);
+    // Dashboard labels are plain text; strip control characters and cap length.
+    $value = preg_replace('/[\x00-\x1F\x7F]/u', '', $value) ?? '';
+    if (function_exists('mb_substr')) return mb_substr($value, 0, 80, 'UTF-8');
+    if (preg_match_all('/./us', $value, $chars)) return implode('', array_slice($chars[0], 0, 80));
+    return substr($value, 0, 80);
+}
+
+function sanitizeFanDisplay(array $input): array {
+    $out = defaultFanDisplay();
+    $out['hide_zero_rpm'] = !array_key_exists('hide_zero_rpm', $input) || !empty($input['hide_zero_rpm']);
+    $remarks = [];
+    foreach (($input['remarks'] ?? []) as $key => $value) {
+        $key = strtolower(trim((string)$key));
+        if (!preg_match('/^fan[0-9]+$/', $key)) continue;
+        $remark = sanitizeFanRemark($value);
+        if ($remark !== '') $remarks[$key] = $remark;
+    }
+    ksort($remarks, SORT_NATURAL);
+    $out['remarks'] = $remarks;
+    return $out;
+}
+
+function readFanDisplay(): array {
+    return sanitizeFanDisplay(readJson(SFC_FAN_DISPLAY, defaultFanDisplay()));
+}
+
+function fanDisplayInfo(?array $hardware = null): array {
+    $hardware ??= scanHardware();
+    $cfg = readFanDisplay();
+    $fans = [];
+    foreach (($hardware['fans'] ?? []) as $fan) {
+        if (!is_array($fan)) continue;
+        $key = fanDisplayKeyFromChannel((string)($fan['channel'] ?? ''));
+        if ($key === null) continue;
+        $fans[] = [
+            'id' => (string)($fan['id'] ?? ''),
+            'key' => $key,
+            'chip' => (string)($fan['chip'] ?? ''),
+            'device' => (string)($fan['device'] ?? ''),
+            'channel' => (string)($fan['channel'] ?? ''),
+            'label' => (string)($fan['label'] ?? $key),
+            'rpm' => isset($fan['rpm']) && is_numeric($fan['rpm']) ? (int)$fan['rpm'] : null,
+            'remark' => (string)($cfg['remarks'][$key] ?? ''),
+        ];
+    }
+    usort($fans, function($a, $b) {
+        $ka = (int)preg_replace('/\D+/', '', (string)$a['key']);
+        $kb = (int)preg_replace('/\D+/', '', (string)$b['key']);
+        return $ka <=> $kb ?: strcmp((string)$a['label'], (string)$b['label']);
+    });
+    return ['config' => $cfg, 'fans' => $fans];
 }
 
 function scanHardware(): array {
@@ -415,9 +484,19 @@ $action = (string)($_POST['action'] ?? $_GET['action'] ?? 'status');
 
 switch ($action) {
     case 'scan':
-        respond(['ok' => true, 'hardware' => scanHardware(), 'config' => readJson(SFC_CONFIG, defaultConfig()), 'drivers' => driverInfo()]);
+        
+        $hardware = scanHardware();
+        respond(['ok' => true, 'hardware' => $hardware, 'config' => readJson(SFC_CONFIG, defaultConfig()), 'drivers' => driverInfo(), 'fan_display' => fanDisplayInfo($hardware)]);
     case 'status':
-        respond(['ok' => true, 'running' => daemonRunning(), 'status' => readJson(SFC_STATUS, []), 'config' => readJson(SFC_CONFIG, defaultConfig()), 'drivers' => driverInfo()]);
+        respond(['ok' => true, 'running' => daemonRunning(), 'status' => readJson(SFC_STATUS, []), 'config' => readJson(SFC_CONFIG, defaultConfig()), 'drivers' => driverInfo(), 'fan_display' => fanDisplayInfo()]);
+    case 'fan_display_info':
+        respond(['ok' => true, 'fan_display' => fanDisplayInfo()]);
+    case 'fan_display_save':
+        $payload = json_decode((string)($_POST['payload'] ?? ''), true);
+        if (!is_array($payload)) respond(['ok' => false, 'error' => 'Invalid fan display payload'], 400);
+        $fanDisplay = sanitizeFanDisplay($payload);
+        if (!writeJsonAtomic(SFC_FAN_DISPLAY, $fanDisplay)) respond(['ok' => false, 'error' => '无法写入 fan-display.json'], 500);
+        respond(['ok' => true, 'fan_display' => fanDisplayInfo()]);
     case 'driver_info':
         respond(['ok' => true, 'drivers' => driverInfo()]);
     case 'driver_detect':

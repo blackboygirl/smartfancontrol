@@ -12,6 +12,7 @@ SUPPORT_URL = f'https://github.com/{GITHUB}/issues'
 
 FILES = [
     ('/usr/local/emhttp/plugins/smartfancontrol/SmartFanControl.page', '0644', ROOT / 'source/usr/local/emhttp/plugins/smartfancontrol/SmartFanControl.page'),
+    ('/usr/local/emhttp/plugins/smartfancontrol/SmartFanControl.Dashboard.page', '0644', ROOT / 'source/usr/local/emhttp/plugins/smartfancontrol/SmartFanControl.Dashboard.page'),
     ('/usr/local/emhttp/plugins/smartfancontrol/api.php', '0644', ROOT / 'source/usr/local/emhttp/plugins/smartfancontrol/api.php'),
     ('/usr/local/emhttp/plugins/smartfancontrol/default.json', '0644', ROOT / 'source/usr/local/emhttp/plugins/smartfancontrol/default.json'),
     ('/usr/local/emhttp/plugins/smartfancontrol/scripts/smartfan-daemon.php', '0755', ROOT / 'source/usr/local/emhttp/plugins/smartfancontrol/scripts/smartfan-daemon.php'),

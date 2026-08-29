@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.08.29a
+- Add Dashboard fan-display customization for Unraid's native **Fan Information** tile.
+- Add **Only show fans with RPM > 0** filtering; zero-RPM channels are hidden dynamically without affecting PWM control or stall protection.
+- Add persistent per-channel fan remarks/display names (for example `FAN 5` -> `Tesla P4 Fan`) with live Dashboard updates.
+- Add a **Dashboard Fan Display** panel under Smart Fan Control settings showing detected RPM channels, current speed, and editable remarks.
+- Store Dashboard display preferences independently in `/boot/config/plugins/smartfancontrol/fan-display.json`.
+- Keep fan identification based on `fanN_input` channel numbers so Dashboard customizations survive `hwmonX` renumbering and normal reboots.
+
 ## 2026.08.29
 - Prepare the repository for Unraid Community Applications submission using the current official starter layout (`ca_profile.xml` plus `plugins/smartfancontrol.xml`).
 - Switch the public plugin version scheme from `0.1.x` to Unraid/LimeTech-style date versions (`YYYY.MM.DD`; use `a`, `b`, ... for additional releases on the same day).
